@@ -394,7 +394,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &531451566
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -407,10 +407,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6beb2ebe80f8c45aa8885f9b99272ab6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  timePerFrame: 10
+  timePerFrame: 100
   testPart: 1
   inputParam: 1
-  getTypeEnum: 0
+  getTypeEnum: 1
 --- !u!4 &531451567
 Transform:
   m_ObjectHideFlags: 0
@@ -540,7 +540,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &1443612094
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -553,9 +553,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cc95cdd71f25845a68805efe2647f3b2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  timePerFrame: 1000
+  timePerFrame: 100
   isLogArray: 0
   isLogMatrix: 0
+  testPart: 1
+  stackType: 0
 --- !u!4 &1443612095
 Transform:
   m_ObjectHideFlags: 0
