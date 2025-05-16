@@ -89,7 +89,7 @@ public class MapLayeringPrePass : ScriptableRenderPass
 
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
     {
-        CommandBuffer cmd = renderingData.commandBuffer;
+        CommandBuffer cmd = CommandBufferPool.Get();
 
         List<RendererBlock> prepassSequence = MapLayeringManager._prepassRendererSequence;
         if (prepassSequence.Count <= 0)
@@ -129,5 +129,6 @@ public class MapLayeringPrePass : ScriptableRenderPass
 
         context.ExecuteCommandBuffer(cmd);
         cmd.Clear();
+        CommandBufferPool.Release(cmd);
     }
 }
