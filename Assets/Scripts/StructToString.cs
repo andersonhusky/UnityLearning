@@ -1,7 +1,10 @@
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using System.Text;
 using Unity.Collections;
@@ -43,17 +46,40 @@ namespace UnityMap.Managers
         private static readonly ConcurrentDictionary<Type, FieldInfo[]> _cachedFields = new();
         private static readonly ConcurrentDictionary<Type, PropertyInfo> _cachedIsCreatedProps = new();
         private static readonly ConcurrentDictionary<Type, PropertyInfo> _cachedLengthProps = new();
+        private static readonly ConcurrentDictionary<Type, string> _cachedNativeTypeNames = new();
         private static readonly ConcurrentDictionary<Type, string> _cachedTypeNames = new();
+        private static readonly ConcurrentDictionary<Type, string> _cachedTypeNameSpace = new();
         #endregion
+
+        private delegate TValue FieldGetter<T, TValue>(ref T obj);
+        private static readonly ConcurrentDictionary<FieldInfo, Delegate> _fieldAccessors = new();
+        private static FieldGetter<T, object> CreateFieldGetter<T>(FieldInfo field)
+        {
+            var method = new DynamicMethod(
+                $"Get_{field.DeclaringType.Name}_{field.Name}",
+                typeof(object),
+                new[] { typeof(T).MakeByRefType() },
+                field.DeclaringType,
+                skipVisibility: true);
+
+            var il = method.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, field);
+            if (field.FieldType.IsValueType)
+                il.Emit(OpCodes.Box, field.FieldType);
+            il.Emit(OpCodes.Ret);
+
+            return (FieldGetter<T, object>)method.CreateDelegate(typeof(FieldGetter<T, object>));
+        }
 
         private static readonly string IndentCheckStr = "... 递归层级过深，停止记录 ...";
         /// <summary>
         /// Add Comment by White Hong - 2025-04-11 22:44:50
         /// 递归打印一个对象的全部信息
         /// <summary>
-        public static void GetStructInfoStringRecur(object structObj, StringBuilder sb, int indentLevel = 0, bool isLogArray = false, bool isNeedIndent = true)
+        public static void GetStructInfoStringRecur<T>(T structObj, StringBuilder sb, int indentLevel = 0, Type structObjType = null, bool isLogArray = false, bool isNeedIndent = true)   // 优化点，范型代替object，避免装箱
         {
-            if (structObj == null)
+            if (!typeof(T).IsValueType && structObj == null)    // 优化点，值类型不判null，避免装箱
             {
                 sb.Append(NullStr);
                 return;
@@ -66,7 +92,9 @@ namespace UnityMap.Managers
                 return;
             }
 
-            Type type = structObj.GetType();
+            Type type = structObjType == null? typeof(T) : structObjType;      // 优化点：从object.GetType()改成typeof(T)
+            var typeName = _cachedTypeNames.GetOrAdd(type, t => t.Name);    // 优化点，避免使用type.name
+            var typeNameSpace = _cachedTypeNameSpace.GetOrAdd(type, t => t.Namespace);
             string indent = LazyIndentCache.Value[indentLevel];
             // var sb = StringBuilderPool.Acquire();
 
@@ -82,20 +110,20 @@ namespace UnityMap.Managers
                 sb.Append(structObj).Append(NewLineStr);
             }
             // 不打印的特殊类型
-            else if (type.Name.Contains(FixedStringStr))
+            else if (typeName.Contains(FixedStringStr))
             {
-                sb.Append(type.Name).Append(NotLoggedStr).Append(NewLineStr);
+                sb.Append(typeName).Append(NotLoggedStr).Append(NewLineStr);
             }
             // 安全处理 UnsafeHashMap 和 UnsafeList 类型
-            else if (type.Namespace?.Contains(UCollectionsStr) == true &&
-                (type.Name.Contains(UnsafeStr) || type.Name.Contains(NativeStr)))
+            else if (typeNameSpace?.Contains(UCollectionsStr) == true &&
+                (typeName.Contains(UnsafeStr) || typeName.Contains(NativeStr)))
             {
                 HandleUnityCollectionsType(type, structObj, sb, indent, indentLevel, isLogArray);
             }
             else
             {
                 // 复杂结构递归打印
-                sb.Append(type.Name).Append(LeftBrackets).AppendLine();
+                sb.Append(typeName).Append(LeftBrackets).AppendLine();
                 try
                 {
                     var fields = _cachedFields.GetOrAdd(type, t =>
@@ -120,11 +148,16 @@ namespace UnityMap.Managers
         /// Add Comment by White Hong - 2025-05-07 17:10:10
         /// 按照field info打印结构体，每个类型的结构体的field info存在一个dictionary中
         /// <summary>
-        private static void AppendFieldInfo(FieldInfo field, object obj, StringBuilder sb, string indent, int indentLevel, bool isLogArray, char endWith)
+        private static void AppendFieldInfo<T>(FieldInfo field, T obj, StringBuilder sb, string indent, int indentLevel, bool isLogArray, char endWith)
         {
             try
             {
-                var value = field.GetValue(obj);
+                // 获取或创建字段访问器
+                var getter = (FieldGetter<T, object>)_fieldAccessors.GetOrAdd(field, f => CreateFieldGetter<T>(f)); 
+                // 获取字段值（无装箱）
+                object value = getter(ref obj);    // 优化点，避免装箱，单独测过有明显gc降低
+                // object value = field.GetValue(obj);
+
                 // 添加公共前缀
                 sb.Append(indent).Append(TabStr).Append(HyphenStr).Append(field.Name).Append(ColonStr);
 
@@ -132,7 +165,7 @@ namespace UnityMap.Managers
                 if (field.FieldType.IsValueType && !field.FieldType.IsPrimitive && field.FieldType != typeof(decimal))
                 {
                     sb.AppendLine();
-                    GetStructInfoStringRecur(value, sb, indentLevel + 1, isLogArray: isLogArray, isNeedIndent: true);
+                    GetStructInfoStringRecur(value, sb, indentLevel + 1, isLogArray: isLogArray, structObjType: field.FieldType, isNeedIndent: true);
                 }
                 // 常见类型，直接打印
                 else
@@ -177,8 +210,9 @@ namespace UnityMap.Managers
         private static readonly string IsCreatedStr = "IsCreated";
         private static readonly string LengthStr = "Length";
         private static string LengthLeftStr = " (Length: ";
-        private static void HandleUnityCollectionsType(Type type, object obj, StringBuilder sb, string indent, int indentLevel, bool isLogArray)
+        private static void HandleUnityCollectionsType<T>(Type type, T obj, StringBuilder sb, string indent, int indentLevel, bool isLogArray)
         {
+            var typeName = _cachedTypeNames.GetOrAdd(type, t => t.Name);
             // 1. 检查 IsCreated 属性
             bool isCreated = false;
             var isCreatedProp = _cachedIsCreatedProps.GetOrAdd(type, t =>
@@ -190,14 +224,14 @@ namespace UnityMap.Managers
             }
             if (!isCreated)
             {
-                sb.Append(indent).Append(type.Name).Append(NotCreatedStr).Append(NewLineStr);
+                sb.Append(indent).Append(typeName).Append(NotCreatedStr).Append(NewLineStr);
                 return;
             }
 
             // 2. 处理带 Length 的类型
             var lengthProp = _cachedLengthProps.GetOrAdd(type, t =>
                 t.GetProperty(LengthStr));
-            var typeName = _cachedTypeNames.GetOrAdd(type, t =>
+            var typeNativeName = _cachedNativeTypeNames.GetOrAdd(type, t =>
                 t.GetGenericArguments()[0].Name);
             if (lengthProp != null)
             {
@@ -214,7 +248,7 @@ namespace UnityMap.Managers
                     // 其他集合类型仅打印摘要信息
                     else
                     {
-                        sb.Append(indent).Append(typeName).Append(LengthLeftStr).Append(length).Append(RightBrackets).Append(NewLineStr);
+                        sb.Append(indent).Append(typeNativeName).Append(LengthLeftStr).Append(length).Append(RightBrackets).Append(NewLineStr);
                     }
                     return;
                 }
@@ -222,7 +256,7 @@ namespace UnityMap.Managers
             }
 
             // 3. 默认情况：仅打印类型名
-            sb.Append(indent).Append(typeName).Append(NewLineStr);
+            sb.Append(indent).Append(typeNativeName).Append(NewLineStr);
         }
         private static readonly string NativeArrayLeftStr = "NativeArray<";
         private static readonly string NativeArrayMidStr = "> (Length: ";
@@ -255,48 +289,6 @@ namespace UnityMap.Managers
             }
 
             sb.Append(indent).Append(RightBrackets).AppendLine();
-        }
-    }
-
-    /// <summary>
-    /// Add Comment by White Hong - 2025-04-26 00:58:25
-    /// 核心优化，缓存StringBuilder
-    /// <summary>
-    public static class StringBuilderPool
-    {
-        // 每个线程独立的对象池（万一在线程中用到，避免线程竞争）
-        [ThreadStatic]
-        private static ConcurrentStack<StringBuilder> _pool;
-        private const int DefaultCapacity = 1024;
-
-        public static StringBuilder Acquire(int capacity = DefaultCapacity)
-        {
-            _pool ??= new ConcurrentStack<StringBuilder>();
-            if (_pool.TryPop(out var sb))
-            {
-                if (sb.Capacity < capacity)
-                {
-                    sb.Capacity = capacity;
-                }
-                sb.Clear();
-                return sb;
-            }
-            return new StringBuilder(DefaultCapacity);  // 新建
-        }
-
-        public static string GetStringAndRelease(StringBuilder sb)
-        {
-            string result = sb.ToString();
-            Release(sb);
-            return result;
-        }
-
-        public static void Release(StringBuilder sb)
-        {
-            if (sb == null) return;
-
-            sb.Clear();
-            _pool.Push(sb);
         }
     }
 }

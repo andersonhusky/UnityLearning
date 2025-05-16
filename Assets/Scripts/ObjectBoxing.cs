@@ -104,7 +104,7 @@ public class ObjectBoxing : MonoBehaviour
 
     /// <summary>
     /// Add Comment by White Hong - 2025-05-09 17:53:24
-    /// 循环1000次，每帧耗时约9ms
+    /// 循环1000次，每帧耗时约9ms，有gc
     /// <summary>
     private void TestGetDirectly()
     {
@@ -117,7 +117,7 @@ public class ObjectBoxing : MonoBehaviour
 
     /// <summary>
     /// Add Comment by White Hong - 2025-05-09 19:26:50
-    /// 循环1000次，每帧耗时约2.5ms
+    /// 循环1000次，每帧耗时约2.5ms，有gc
     /// <summary>
     private void TestGetByDynamicMethod()
     {
