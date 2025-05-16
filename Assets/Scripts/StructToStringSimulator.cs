@@ -87,9 +87,9 @@ public class StructToStringSimulator : MonoBehaviour
             // 直接调用StructToString测试
             var sb = StringBuilderPool.Acquire();
             UnityLogManagerObj.GetStructInfoStringRecur(testData, sb, isLogArray: isLogArray);
-            strPerFrame.Append(StringBuilderPool.GetStringAndRelease(sb));
+            // strPerFrame.Append(StringBuilderPool.GetStringAndRelease(sb));
             
-            // StringBuilderPool.Release(sb);
+            StringBuilderPool.Release(sb);
         }
     }
 
