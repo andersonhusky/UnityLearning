@@ -29,7 +29,7 @@ public class MapLayeringForwardPass : ScriptableRenderPass
         if (forwardSequence.Count + transparentSequence.Count <= 0)
             return;
 
-        CommandBuffer cmd = renderingData.commandBuffer;
+        CommandBuffer cmd = CommandBufferPool.Get();
 
         using (new ProfilingScope(cmd, _profilingSampler))
         {
@@ -72,6 +72,7 @@ public class MapLayeringForwardPass : ScriptableRenderPass
             
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
+            CommandBufferPool.Release(cmd);
         }
     }
 }
