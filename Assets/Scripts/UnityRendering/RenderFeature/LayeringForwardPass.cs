@@ -69,10 +69,10 @@ public class MapLayeringForwardPass : ScriptableRenderPass
                 context.DrawRenderers(renderingData.cullResults, ref opaqueDrawingSettings,
                     ref filterSettings, ref rendererBlock.RenderStateBlock);
             }
-            
-            context.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
-            CommandBufferPool.Release(cmd);
         }
+
+        context.ExecuteCommandBuffer(cmd);
+        cmd.Clear();
+        CommandBufferPool.Release(cmd);
     }
 }
