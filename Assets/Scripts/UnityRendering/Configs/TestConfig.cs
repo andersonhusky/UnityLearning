@@ -114,12 +114,12 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     #region 测试用
     public static bool isDebug = false;
-    private Material[] testMaterials;
+    private LayeringController layeringController;
     #endregion
 
-    public LayerRenderingConfiguration(LayeringController go)
+    public LayerRenderingConfiguration(LayeringController layerCtrl)
     {
-        testMaterials = go.testMaterials;
+        layeringController = layerCtrl;
         InitConfig();
     }
 
@@ -142,6 +142,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         transparentRenderQueue = 2500;
         SetUpSharedInfos();
 
+        SetUp3DObjects();
         SetUpAreas();
     }
 
@@ -152,10 +153,10 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     private void SetUpAreas()
     {
-        for(int i = 0; i < testMaterials.Length; ++i)
+        for(int i = 0; i < layeringController.testPlaneMaterials.Length; ++i)
         {
             int polygonQueue = opaqueRenderQueue++;
-            SetQueue(testMaterials, i, polygonQueue);
+            SetQueue(layeringController.testPlaneMaterials, i, polygonQueue);
             AddToList(new LayeringInfo()
             {
                 GeoType = GeometryType.Grounded,
@@ -165,6 +166,25 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 Mode = MapMode.Map2D,
                 RenderingLayerMask = Layer.k_Default,
                 OpaqueIndexAbove = opaqueElementIndexAbove
+            });
+        }
+    }
+
+    private void SetUp3DObjects()
+    {
+        opaqueRenderQueue = 2000;
+        for(int i = 0; i < layeringController.test3DObjectMaterials.Length; ++i)
+        {
+            int objectQueue = opaqueRenderQueue++;
+            SetQueue(layeringController.test3DObjectMaterials, i, objectQueue);
+            AddToList(new LayeringInfo()
+            {
+                GeoType = GeometryType.AboveGround,
+                Output = OutputType.CommonOpaque,
+                RenderQueue = objectQueue,
+                RenderPass = LayerPassType.All,
+                RenderingLayerMask = Layer.k_Default,
+                OpaqueIndexAbove = opaqueElementIndexAbove,
             });
         }
     }
