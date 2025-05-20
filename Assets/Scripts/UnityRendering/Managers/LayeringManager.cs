@@ -8,6 +8,36 @@ using UnityEngine.Rendering.Universal.LibTessDotNet;
 
 public partial class MapLayeringManager
 {
+    public struct RendererBlockParam
+    {
+        public bool isOpaque;
+        public bool needDepthTest;
+        public bool needDepthWrite;
+        public bool hasDepthConflict;
+        public bool needStencilTest;
+        public bool needStencilWrite;
+        public bool is3D;
+        public int destRenderingLayerMask;
+        public bool noSSPR;
+
+        public RendererBlockParam(LayeringInfo info)
+        {
+            GeometryType geoType = info.GeoType;
+            OutputType output = info.Output;
+            int opaqueIndexAbove = info.OpaqueIndexAbove;
+
+            isOpaque = IsOpaque(info);
+            needDepthTest = IsNeedDepthTest(output, geoType);
+            needDepthWrite = IsNeedDepthWrite(output);
+            //When elements can not use depth test and covered by opaque elements, they need stencil test
+            hasDepthConflict = true;//!(geoType == GeometryType.AboveGround);
+            needStencilTest = IsNeedStencilTest(needDepthTest, hasDepthConflict, isOpaque, output, geoType, opaqueIndexAbove);
+            needStencilWrite = IsNeedStencilWrite(isOpaque, output);
+            is3D = Is3D(info);
+            destRenderingLayerMask = (int)info.RenderingLayerMask;
+            noSSPR = IsNoSSPR(ref destRenderingLayerMask);
+        }
+    }
     private static IMapLayeringConfiguration _layeringConfig;
     public static MapMode MapViewMode;
 
@@ -43,6 +73,7 @@ public partial class MapLayeringManager
     
     //Special rendering layer masks
     private const uint k_NoSSPR_RenderingLayerMask = (uint)1 << 29;
+    private const uint k_LLNTransparent = (uint)1 << 30;
 
     private const int buildingStencilReference = k_levelMaskAll | 31;
     private static RenderStateBlock GroundMaskStateBlock()
@@ -227,7 +258,7 @@ public partial class MapLayeringManager
     {
         if(lastPass != excludePass)
         {
-            AddRendererBlock(ref destSequence, previousLayerInfo, layerIndex,
+            AddRendererBlockNew(ref destSequence, previousLayerInfo, layerIndex,
                             currentMinQueue, currentMaxQueue, currentStencilRef,
                             viewID, excludePass);
 
@@ -295,7 +326,7 @@ public partial class MapLayeringManager
     {
         if(layeringInfo.RenderPass != excludePass)
         {
-            AddRendererBlock(ref destSequence, layeringInfo, 0,
+            AddRendererBlockNew(ref destSequence, layeringInfo, 0,
                             currentMinQueue, currentMaxQueue, currentStencilRef,
                             viewID, excludePass);
         }
@@ -378,6 +409,230 @@ public partial class MapLayeringManager
             {
                 AddRendererBlock(ref destSequence, layerInfo, 0, currentMinQueue, currentMaxQueue, currentStencilRef, viewID, excludePass);
             }
+        }
+    }
+
+    private static void AddRendererBlockNew(ref List<RendererBlock> rendererSequence, LayeringInfo info, int infoIndex, int currentMinQueue,
+        int currentMaxQueue, int stencilRef, int viewID, LayerPassType excludePass)
+    {
+        GeometryType geoType = info.GeoType;
+        OutputType output = info.Output;
+
+        RendererBlockParam rendererBlockParam = new RendererBlockParam(info);
+        LevelInfo levelInfo = GetLevelsInfoByViewID(viewID);
+
+        //special case when rendering layer mask is k_LLNTransparent
+        if ((rendererBlockParam.destRenderingLayerMask & k_LLNTransparent) != 0)
+        {
+            CreateLLNTransparentStateBlock(ref rendererSequence, excludePass, currentMinQueue, currentMaxQueue,
+                                            stencilRef, rendererBlockParam);
+        }
+        else
+        {
+            CreateNormalStateBlock(ref rendererSequence, output, levelInfo, excludePass,
+                                    rendererBlockParam,
+                                    stencilRef, currentMinQueue, currentMaxQueue);
+        }
+        
+        if (rendererBlockParam.needDepthWrite && geoType != GeometryType.None)
+        {
+            underIndices[(int)geoType] = infoIndex;
+        }
+    }
+
+    private static void CreateLLNTransparentStateBlock(ref List<RendererBlock> rendererSequence, LayerPassType excludePass,
+                                                        int currentMinQueue, int currentMaxQueue,
+                                                        int stencilRef, RendererBlockParam rendererBlockParam)
+    {
+        //Draw LLN Roads who's rendering layer is k_LLNTransparent twice
+            //First pass draw it with depth write disabled
+            //Second pass draw it with depth write enabled
+            //note rendererSequence is reverted to actual execute order
+            if (excludePass == LayerPassType.PrePass)
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    RenderStateBlock renderStateBlock = LLNTransparentStateBlock(i == 1);
+                    RendererBlock rendererBlock = new RendererBlock()
+                    {
+                        minQueue = currentMinQueue,
+                        maxQueue = currentMaxQueue,
+                        RenderStateBlock = renderStateBlock,
+                        RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
+                    };
+                    _forwardRendererTransparentSequence.Add(rendererBlock);
+                }
+            }
+            else
+            {
+                var renderStateBlock = new RenderStateBlock();
+                var depthState = DepthOpaque;
+                var stencilState = new StencilState();
+                var blendState = BlendStateOpaque;
+                stencilState.readMask = k_noLevelMask;
+                stencilState.writeMask = k_noLevelMask;
+                stencilState.compareFunctionFront = stencilState.compareFunctionBack = CompareFunction.GreaterEqual;
+                stencilState.enabled = true;
+                stencilState.passOperationFront = stencilState.passOperationBack = StencilOp.Replace;
+                stencilState.failOperationFront = stencilState.failOperationBack = StencilOp.Keep;
+                renderStateBlock.blendState = blendState;
+                renderStateBlock.depthState = depthState;
+                int destStencilRef = stencilRef;
+                
+                //Process stencil state for non sspr objects
+                stencilState.readMask = 127;
+                stencilState.writeMask = 255;
+                if(rendererBlockParam.noSSPR)
+                    destStencilRef |= k_noSSPR_StencilMask;
+                
+                renderStateBlock.stencilState = stencilState;
+                renderStateBlock.stencilReference = destStencilRef;
+                renderStateBlock.mask = RenderStateMask.Blend | RenderStateMask.Stencil | RenderStateMask.Depth;
+                
+                RendererBlock rendererBlock = new RendererBlock()
+                {
+                    minQueue = currentMinQueue,
+                    maxQueue = currentMaxQueue,
+                    RenderStateBlock = renderStateBlock,
+                    RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
+                };
+                
+                rendererSequence.Add(rendererBlock);
+            }
+    }
+
+    private static void CreateNormalStateBlock(ref List<RendererBlock> rendererSequence, OutputType output, LevelInfo levelInfo, LayerPassType excludePass,
+                                                RendererBlockParam rendererBlockParam,
+                                                int stencilRef, int currentMinQueue, int currentMaxQueue)
+    {
+        int levelCount = (rendererBlockParam.destRenderingLayerMask & levelInfo.levelAll) == 0 ? 1 : 3;
+
+        //Once we have multi-level data, need different rendering layer mask and stencil value for each level
+        for (int levelIndex = 0; levelIndex < levelCount; levelIndex++)
+        {
+            int id = 2 - levelIndex;
+            if (levelCount == 1)
+                id = -1;
+            else
+                rendererBlockParam.destRenderingLayerMask = levelInfo.levels[levelIndex];
+
+            if (rendererBlockParam.destRenderingLayerMask < 0)
+                continue;
+
+            RenderStateBlock renderStateBlock = new RenderStateBlock();
+            BlendState blendState;
+            DepthState depthState;
+            StencilState stencilState;
+
+            bool isMask = output == OutputType.DepthOnlyMask || output == OutputType.StencilOnlyMask;
+            blendState = !rendererBlockParam.isOpaque
+                ? BlendStateTransparent
+                : (isMask ? BlendStateOpaqueNoColor : BlendStateOpaque);
+            
+            depthState = new DepthState()
+            {
+                writeEnabled = rendererBlockParam.needDepthWrite,
+                compareFunction = rendererBlockParam.needDepthTest ? CompareFunction.LessEqual : CompareFunction.Always
+            };
+            //-//This is workaround for car mask. Water bottom will be wrong in prepass if using this depth state.
+            //depthState = output == OutputType.StencilOnlyMask ? DepthNoTestNoWrite : depthState;
+            //depthState = layerType == MapLayerType.HoleMask ? DepthTestNoWrite : depthState;
+            //if (layerType == MapLayerType.Clear)
+            //{
+            //    depthState.writeEnabled = false;
+            //    depthState.compareFunction = CompareFunction.Always;
+            
+            // if (output == OutputType.StencilOnlyMask)
+            // {
+            //     var bs0 = blendState.blendState0;
+            //     bs0.writeMask = ColorWriteMask.All;
+            //     blendState.blendState0 = bs0;
+            //
+            //     depthState.writeEnabled = true;
+            // }
+            
+            stencilRef = Mathf.Min(stencilRef, 31);
+            int destStencilReference = stencilRef;
+            stencilState = new StencilState();
+            stencilState.readMask = k_noLevelMask;
+            stencilState.writeMask = k_noLevelMask;
+
+            var comp = rendererBlockParam.is3D ? CompareFunction.GreaterEqual : CompareFunction.Greater;
+            comp = rendererBlockParam.needStencilTest ? comp : CompareFunction.Always;
+            //comp = layerType == MapLayerType.Hole ? CompareFunction.Always : comp;
+            stencilState.compareFunctionFront = stencilState.compareFunctionBack = comp;
+            stencilState.enabled = true;
+
+            var stencilPassOperation = rendererBlockParam.needStencilWrite ? StencilOp.Replace : StencilOp.Keep;
+            //stencilPassOperation = layerType == MapLayerType.Hole ? StencilOp.Keep : stencilPassOperation;
+            stencilState.passOperationFront = stencilState.passOperationBack = stencilPassOperation;
+            stencilState.failOperationFront = stencilState.failOperationBack = StencilOp.Keep;
+            
+            if (levelCount == 3)
+            {
+                if (output == OutputType.StencilOnlyMask)
+                {
+                    stencilState.compareFunctionFront = CompareFunction.Greater;
+                    stencilState.compareFunctionBack = CompareFunction.Greater;
+                    stencilState.passOperationFront = StencilOp.Replace;
+                    stencilState.passOperationBack = StencilOp.Replace;
+                    stencilState.readMask = k_levelMaskAll;
+                    stencilState.writeMask = k_levelMaskAll;
+                    destStencilReference = k_levelMasks[levelIndex];
+                }
+                else
+                {
+                    stencilState.compareFunctionFront = CompareFunction.Greater;
+                    stencilState.compareFunctionBack = CompareFunction.Greater;
+                    stencilState.passOperationFront = StencilOp.Replace;
+                    stencilState.passOperationBack = StencilOp.Replace;
+                    stencilState.readMask = 255;
+                    stencilState.writeMask = 255;
+                    destStencilReference = k_levelMasks[levelIndex] | stencilRef;
+                }
+            }
+            // else if (is3D && isOpaque)
+            // {
+            //     stencilState.writeMask = 255;
+            //     destStencilReference = k_levelMaskAll | stencilRef;
+            // }
+            // else if (layerType == MapLayerType.Building)
+            // {
+            //     stencilState.writeMask = 255;
+            //     destStencilReference = buildingStencilReference;
+            // }
+            
+            //Process stencil state for non sspr objects
+            if (excludePass == LayerPassType.Forward)
+            {
+                stencilState.readMask = 127;
+                stencilState.writeMask = 255;
+                if(rendererBlockParam.noSSPR)
+                    destStencilReference |= k_noSSPR_StencilMask;
+            }
+            
+            renderStateBlock.blendState = blendState;
+            renderStateBlock.depthState = depthState;
+            renderStateBlock.stencilState = stencilState;
+            renderStateBlock.stencilReference = destStencilReference; //layerType == MapLayerType.Clear ? 0 : switchCount;
+
+            bool useDefaultBlend = output == OutputType.CommonDefault || output == OutputType.OverlayDefault;
+            renderStateBlock.mask = RenderStateMask.Depth | RenderStateMask.Stencil;
+            if (!useDefaultBlend)
+                renderStateBlock.mask |= RenderStateMask.Blend;
+            
+            RendererBlock rendererBlock = new RendererBlock()
+            {
+                minQueue = currentMinQueue,
+                maxQueue = currentMaxQueue,
+                RenderStateBlock = renderStateBlock,
+                RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
+            };
+
+            if((rendererBlockParam.isOpaque && output != OutputType.DepthOnlyMask)|| excludePass == LayerPassType.Forward)
+                rendererSequence.Add(rendererBlock);
+            else
+                _forwardRendererTransparentSequence.Add(rendererBlock);
         }
     }
 
@@ -756,5 +1011,49 @@ public partial class MapLayeringManager
         underIndices[0] = -1;
         underIndices[1] = -1;
         underIndices[2] = -1;
+    }
+
+    private static bool IsNeedDepthWrite(OutputType outputType)
+    {
+        return outputType == OutputType.CommonOpaque
+                || outputType == OutputType.OverlayOpaque
+                || outputType == OutputType.DepthOnlyMask;
+    }
+
+    private static bool IsNeedDepthTest(OutputType outputType, GeometryType geometryType)
+    {
+        return outputType == OutputType.CommonOpaque
+                || outputType == OutputType.CommonTransparent
+                || (outputType == OutputType.OverlayOpaque && geometryType > GeometryType.Grounded)  //Like if car draw in layering forward pass
+                || outputType == OutputType.CommonDefault
+                || (outputType == OutputType.DepthOnlyMask && geometryType != GeometryType.Grounded);   //Like water bottom
+    }
+
+    private static bool IsNeedStencilTest(bool needDepthTest, bool hasDepthConflict, bool isOpaque,
+                                        OutputType outputType, GeometryType geometryType, int opaqueIndexAbove)
+    {
+        return (needDepthTest && hasDepthConflict)
+                || outputType == OutputType.StencilOnlyMask
+                || (outputType == OutputType.DepthOnlyMask && geometryType == GeometryType.Grounded)
+                || (opaqueIndexAbove >= 0 && !isOpaque);
+    }
+
+    private static bool IsNeedStencilWrite(bool isOpaque, OutputType outputType)
+    {
+        return isOpaque && (outputType != OutputType.DepthOnlyMask);
+    }
+
+    private static bool IsNoSSPR(ref int destRenderingLayerMask)
+    {
+        bool noSSPR = (destRenderingLayerMask & k_NoSSPR_RenderingLayerMask) != 0;
+        
+        // Remove nosspr bit to avoid unwanted draw of element with same render queue and overlapped rendering layer mask bit
+        // Example: LLN roads above zero has the same queue with LLN roads equal/under zero
+        //          They both have k_NoSSPR bit in rendering layer mask
+        //          LLN>0 exits in transparent queue, but LLN<=0 exits in opaque queue
+        //          They both get repetitive draw because they have same render queue and both have k_NoSSPR bit
+        // The perfect solution should be only one bit in the rendering layer mask.
+        destRenderingLayerMask &= ~(int)k_NoSSPR_RenderingLayerMask;
+        return noSSPR;
     }
 }
