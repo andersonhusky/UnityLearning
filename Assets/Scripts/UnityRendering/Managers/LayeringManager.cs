@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal.LibTessDotNet;
@@ -138,8 +139,8 @@ public partial class MapLayeringManager
             return;
 
         _forwardRendererTransparentSequence.Clear();
-        SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
-        SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
+        SetUpSequenceNew(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
+        SetUpSequenceNew(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
     }
 
     private static int[] underIndices = new[] { -1, -1, -1 };
@@ -147,6 +148,136 @@ public partial class MapLayeringManager
     // 1. The depth test function of opaque 3D objects has to be LessEqual
     // 2. The stencil comparision function of 3D objects has to be GreaterEqual
     //
+    public static void SetUpSequenceNew(LayerPassType excludePass, ref List<RendererBlock> destSequence, int viewID)
+    {
+        destSequence.Clear();
+
+        if(_layeringConfig.LayeringInfos.Count == 0)    return;
+
+        InitializeStateVariables(out var currentMinQueue, out var currentMaxQueue,
+                                out var lastPass, out var currentStencilRef);
+        
+        for (int i = _layeringConfig.LayeringInfos.Count - 2; i >= 0; --i)
+        {
+            LayeringInfo currentLayerInfo = _layeringConfig.LayeringInfos[i];
+            LayeringInfo previousLayerInfo = _layeringConfig.LayeringInfos[i + 1];
+
+            // 需要增加新的RenderBlock
+            if(ShouldCreateNewRenderBlock(currentLayerInfo, previousLayerInfo, excludePass))
+            {
+                ProcessRenderBlockCreation(ref destSequence, currentLayerInfo, previousLayerInfo, i + 1,
+                                            ref currentMinQueue, ref currentMaxQueue, ref currentStencilRef,
+                                            viewID, excludePass, lastPass);
+            }
+            else
+            {
+                UpdateQueueRange(currentLayerInfo, ref currentMinQueue, ref currentMaxQueue, excludePass, lastPass);
+            }
+
+            lastPass = currentLayerInfo.RenderPass;
+
+            if(i == 0)
+            {
+                ProcessFirstLayerSpecialCase(currentLayerInfo, ref destSequence,
+                                            currentMinQueue, currentMaxQueue, currentStencilRef,
+                                            viewID, excludePass);
+            }
+        }
+    }
+
+    private static void InitializeStateVariables(out int currentMinQueue, out int currentMaxQueue,
+                                                out LayerPassType lastPass, out int currentStencilRef)
+    {
+        var lastLayer = _layeringConfig.LayeringInfos.Last();
+        currentMinQueue = lastLayer.RenderQueue;
+        currentMaxQueue = lastLayer.RenderQueue;
+        lastPass = lastLayer.RenderPass;
+        currentStencilRef = 1;
+        RestIndices();
+    }
+
+    private static bool ShouldCreateNewRenderBlock(LayeringInfo currentLayer, LayeringInfo previousLayer,
+                                                LayerPassType excludePass)
+    {
+        bool renderStateChange = previousLayer.Output != currentLayer.Output
+                                || previousLayer.GeoType != currentLayer.GeoType;
+        bool renderingLayerMaskChange = previousLayer.RenderingLayerMask != currentLayer.RenderingLayerMask;
+        bool isExcludePass = currentLayer.RenderPass == excludePass;
+        return renderStateChange || isExcludePass || renderingLayerMaskChange;
+    }
+
+    private static void ProcessRenderBlockCreation(ref List<RendererBlock> destSequence, LayeringInfo currentLayerInfo, LayeringInfo previousLayerInfo, int layerIndex,
+                                                    ref int currentMinQueue, ref int currentMaxQueue, ref int currentStencilRef, int viewID,
+                                                    LayerPassType excludePass, LayerPassType lastPass)
+    {
+        if(lastPass != excludePass)
+        {
+            AddRendererBlock(ref destSequence, previousLayerInfo, layerIndex,
+                            currentMinQueue, currentMaxQueue, currentStencilRef,
+                            viewID, excludePass);
+
+            if(DetermineStencilIncrement(previousLayerInfo, currentLayerInfo))
+            {
+                currentStencilRef++;
+            }
+        }
+
+        currentMinQueue = currentLayerInfo.RenderQueue;
+        currentMaxQueue = currentLayerInfo.RenderQueue;
+    }
+
+    /// <summary>
+    /// Add Comment by White Hong - 2025-05-20 11:14:26
+    /// 判断是否需要增加模板值
+    /// <summary>
+    private static bool DetermineStencilIncrement(LayeringInfo currentLayer, LayeringInfo nextLayer)
+    {
+        bool condition1 = IsOpaque(currentLayer) && !IsOpaque(nextLayer);       // opaque切换到tran
+        bool condition2 = IsOpaque(currentLayer) && Is3D(currentLayer) && !Is3D(nextLayer);     // 3D切换到2D
+        bool condition3 = Is3D(nextLayer) && nextLayer.Output == OutputType.OverlayOpaque && Is3D(currentLayer);    // 3D下碰到overlayOpaque
+        bool condition4 = currentLayer.Output == OutputType.StencilOnlyMask || nextLayer.Output == OutputType.DepthOnlyMask;    // mask
+
+        return condition1 || condition2 || condition3 || condition4;
+    }
+
+    private static void UpdateQueueRange(LayeringInfo layeringInfo, ref int currentMinQueue, ref int currentMaxQueue,
+                                        LayerPassType excludePass, LayerPassType lastPass)
+    {
+        if (lastPass == excludePass)
+        {
+            currentMinQueue = layeringInfo.RenderQueue;
+            currentMaxQueue = layeringInfo.RenderQueue;
+        }
+        else if (IsOpaque(layeringInfo))
+        {
+            // 对于不透明物体，取最小的RenderQueue（最先渲染）
+            currentMinQueue = Mathf.Min(currentMinQueue, layeringInfo.RenderQueue);
+        }
+        else
+        {
+            // 对于透明物体，取最大的RenderQueue（最后渲染）
+            currentMaxQueue = Mathf.Max(currentMaxQueue, layeringInfo.RenderQueue);
+        }
+        // 和上面的else if + else其实是等价的
+        // else
+        // {
+        //     currentMinQueue = Mathf.Min(currentMinQueue, layeringInfo.RenderQueue);
+        //     currentMaxQueue = Mathf.Max(currentMaxQueue, layeringInfo.RenderQueue);
+        // }
+    }
+
+    private static void ProcessFirstLayerSpecialCase(LayeringInfo layeringInfo, ref List<RendererBlock> destSequence,
+                                                    int currentMinQueue, int currentMaxQueue, int currentStencilRef,
+                                                    int viewID, LayerPassType excludePass)
+    {
+        if(layeringInfo.RenderPass != excludePass)
+        {
+            AddRendererBlock(ref destSequence, layeringInfo, 0,
+                            currentMinQueue, currentMaxQueue, currentStencilRef,
+                            viewID, excludePass);
+        }
+    }
+
     public static void SetUpSequence(LayerPassType excludePass, ref List<RendererBlock> destSequence, int viewID)
     {
         destSequence.Clear();
