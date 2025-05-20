@@ -8,6 +8,82 @@ using UnityEngine.Rendering.Universal.LibTessDotNet;
 
 public partial class MapLayeringManager
 {
+    public struct LayerPassInfoPair
+    {
+        public LayerPassType excludePass;
+        public int viewID;
+        public int currentMinQueue;
+        public int currentMaxQueue;
+        public int currentStencilRef;
+
+        public int index;
+        public LayeringInfo currentLayerInfo;
+        public LayeringInfo previousLayerInfo;
+
+        public bool IsPrevExcludePass()
+        {
+            return previousLayerInfo.RenderPass == excludePass;
+        }
+
+        public bool IsCurExcludePass()
+        {
+            return currentLayerInfo.RenderPass == excludePass;
+        }
+
+        public bool DetermineStencilIncrement()
+        {
+            bool condition1 = IsOpaque(previousLayerInfo) && !IsOpaque(currentLayerInfo);       // opaque切换到tran
+            bool condition2 = IsOpaque(previousLayerInfo) && Is3D(previousLayerInfo) && !Is3D(currentLayerInfo);     // 3D切换到2D
+            bool condition3 = Is3D(currentLayerInfo) && currentLayerInfo.Output == OutputType.OverlayOpaque && Is3D(previousLayerInfo);    // 3D下碰到overlayOpaque
+            bool condition4 = previousLayerInfo.Output == OutputType.StencilOnlyMask || currentLayerInfo.Output == OutputType.DepthOnlyMask;    // mask
+
+            return condition1 || condition2 || condition3 || condition4;
+        }
+
+        public void IncreaseStencil()
+        {
+            currentStencilRef++;
+        }
+
+        public void ClearRenderQueue()
+        {
+            currentMinQueue = currentLayerInfo.RenderQueue;
+            currentMaxQueue = currentLayerInfo.RenderQueue;
+        }
+
+        public bool ShouldCreateNewRenderBlock()
+        {
+            bool renderStateChange = previousLayerInfo.Output != currentLayerInfo.Output
+                                    || previousLayerInfo.GeoType != currentLayerInfo.GeoType;
+            bool renderingLayerMaskChange = previousLayerInfo.RenderingLayerMask != currentLayerInfo.RenderingLayerMask;
+            bool isExcludePass = currentLayerInfo.RenderPass == excludePass;
+            return renderStateChange || isExcludePass || renderingLayerMaskChange;
+        }
+
+        public void UpdateQueueRange()
+        {
+            if (IsPrevExcludePass())
+            {
+                ClearRenderQueue();
+            }
+            else if (IsOpaque(currentLayerInfo))
+            {
+                // 对于不透明物体，取最小的RenderQueue（最先渲染）
+                currentMinQueue = Mathf.Min(currentMinQueue, currentLayerInfo.RenderQueue);
+            }
+            else
+            {
+                // 对于透明物体，取最大的RenderQueue（最后渲染）
+                currentMaxQueue = Mathf.Max(currentMaxQueue, currentLayerInfo.RenderQueue);
+            }
+            // 和上面的else if + else其实是等价的
+            // else
+            // {
+            //     currentMinQueue = Mathf.Min(currentMinQueue, currentLayerInfo.RenderQueue);
+            //     currentMaxQueue = Mathf.Max(currentMaxQueue, currentLayerInfo.RenderQueue);
+            // }
+        }
+    }
     public struct RendererBlockParam
     {
         public bool isOpaque;
@@ -186,35 +262,30 @@ public partial class MapLayeringManager
         if(_layeringConfig.LayeringInfos.Count == 0)    return;
 
         // 初始化状态变量
-        InitializeStateVariables(out var currentMinQueue, out var currentMaxQueue,
-                                out var lastPass, out var currentStencilRef);
+        InitializeStateVariables(excludePass, viewID, out LayerPassInfoPair layerPassInfoPair);
         
         // 从后向前遍历层级信息
         for (int i = _layeringConfig.LayeringInfos.Count - 2; i >= 0; --i)
         {
-            LayeringInfo currentLayerInfo = _layeringConfig.LayeringInfos[i];
-            LayeringInfo previousLayerInfo = _layeringConfig.LayeringInfos[i + 1];
+            layerPassInfoPair.index = i + 1;
+            layerPassInfoPair.currentLayerInfo = _layeringConfig.LayeringInfos[i];
+            layerPassInfoPair.previousLayerInfo = _layeringConfig.LayeringInfos[i + 1];
 
             // 需要增加新的RenderBlock
-            if(ShouldCreateNewRenderBlock(currentLayerInfo, previousLayerInfo, excludePass))
+            if(layerPassInfoPair.ShouldCreateNewRenderBlock())
             {
-                ProcessRenderBlockCreation(ref destSequence, currentLayerInfo, previousLayerInfo, i + 1,
-                                            ref currentMinQueue, ref currentMaxQueue, ref currentStencilRef,
-                                            viewID, excludePass, lastPass);
+                ProcessRenderBlockCreation(ref destSequence, ref layerPassInfoPair);
             }
             else
             {
-                UpdateQueueRange(currentLayerInfo, ref currentMinQueue, ref currentMaxQueue, excludePass, lastPass);
+                layerPassInfoPair.UpdateQueueRange();
             }
-
-            lastPass = currentLayerInfo.RenderPass;
 
             // 处理第一个层级的特殊情况
             if(i == 0)
             {
-                ProcessFirstLayerSpecialCase(currentLayerInfo, ref destSequence,
-                                            currentMinQueue, currentMaxQueue, currentStencilRef,
-                                            viewID, excludePass);
+                layerPassInfoPair.index = 0;
+                ProcessFirstLayerSpecialCase(ref destSequence, ref layerPassInfoPair);
             }
         }
     }
@@ -223,112 +294,46 @@ public partial class MapLayeringManager
     /// Add Comment by White Hong - 2025-05-20 14:59:19
     /// 初始化状态变量
     /// <summary>
-    private static void InitializeStateVariables(out int currentMinQueue, out int currentMaxQueue,
-                                                out LayerPassType lastPass, out int currentStencilRef)
+    private static void InitializeStateVariables(LayerPassType excludePass, int viewID, out LayerPassInfoPair layerPassInfoPair)
     {
         var lastLayer = _layeringConfig.LayeringInfos.Last();
-        currentMinQueue = lastLayer.RenderQueue;
-        currentMaxQueue = lastLayer.RenderQueue;
-        lastPass = lastLayer.RenderPass;
-        currentStencilRef = 1;
+        layerPassInfoPair = new LayerPassInfoPair();
+        layerPassInfoPair.excludePass = excludePass;
+        layerPassInfoPair.viewID = viewID;
+        layerPassInfoPair.currentMinQueue = lastLayer.RenderQueue;
+        layerPassInfoPair.currentMaxQueue = lastLayer.RenderQueue;
+        layerPassInfoPair.currentStencilRef = 1;
         RestIndices();
-    }
-
-    /// <summary>
-    /// Add Comment by White Hong - 2025-05-20 15:00:42
-    /// 判断是否需要创建新的渲染块
-    /// <summary>
-    private static bool ShouldCreateNewRenderBlock(LayeringInfo currentLayer, LayeringInfo previousLayer,
-                                                LayerPassType excludePass)
-    {
-        bool renderStateChange = previousLayer.Output != currentLayer.Output
-                                || previousLayer.GeoType != currentLayer.GeoType;
-        bool renderingLayerMaskChange = previousLayer.RenderingLayerMask != currentLayer.RenderingLayerMask;
-        bool isExcludePass = currentLayer.RenderPass == excludePass;
-        return renderStateChange || isExcludePass || renderingLayerMaskChange;
     }
 
     /// <summary>
     /// Add Comment by White Hong - 2025-05-20 15:00:51
     /// 处理渲染块创建逻辑
     /// <summary>
-    private static void ProcessRenderBlockCreation(ref List<RendererBlock> destSequence, LayeringInfo currentLayerInfo, LayeringInfo previousLayerInfo, int layerIndex,
-                                                    ref int currentMinQueue, ref int currentMaxQueue, ref int currentStencilRef, int viewID,
-                                                    LayerPassType excludePass, LayerPassType lastPass)
+    private static void ProcessRenderBlockCreation(ref List<RendererBlock> destSequence, ref LayerPassInfoPair layerPassInfoPair)
     {
-        if(lastPass != excludePass)
+        if(!layerPassInfoPair.IsPrevExcludePass())
         {
-            AddRendererBlockNew(ref destSequence, previousLayerInfo, layerIndex,
-                            currentMinQueue, currentMaxQueue, currentStencilRef,
-                            viewID, excludePass);
+            AddRendererBlockNew(ref destSequence, layerPassInfoPair.previousLayerInfo, ref layerPassInfoPair);
 
-            if(DetermineStencilIncrement(previousLayerInfo, currentLayerInfo))
+            if(layerPassInfoPair.DetermineStencilIncrement())
             {
-                currentStencilRef++;
+                layerPassInfoPair.IncreaseStencil();
             }
         }
 
-        currentMinQueue = currentLayerInfo.RenderQueue;
-        currentMaxQueue = currentLayerInfo.RenderQueue;
-    }
-
-    /// <summary>
-    /// Add Comment by White Hong - 2025-05-20 11:14:26
-    /// 判断是否需要增加模板值
-    /// <summary>
-    private static bool DetermineStencilIncrement(LayeringInfo currentLayer, LayeringInfo nextLayer)
-    {
-        bool condition1 = IsOpaque(currentLayer) && !IsOpaque(nextLayer);       // opaque切换到tran
-        bool condition2 = IsOpaque(currentLayer) && Is3D(currentLayer) && !Is3D(nextLayer);     // 3D切换到2D
-        bool condition3 = Is3D(nextLayer) && nextLayer.Output == OutputType.OverlayOpaque && Is3D(currentLayer);    // 3D下碰到overlayOpaque
-        bool condition4 = currentLayer.Output == OutputType.StencilOnlyMask || nextLayer.Output == OutputType.DepthOnlyMask;    // mask
-
-        return condition1 || condition2 || condition3 || condition4;
-    }
-
-    /// <summary>
-    /// Add Comment by White Hong - 2025-05-20 15:01:07
-    /// 更新渲染队列范围
-    /// <summary>
-    private static void UpdateQueueRange(LayeringInfo layeringInfo, ref int currentMinQueue, ref int currentMaxQueue,
-                                        LayerPassType excludePass, LayerPassType lastPass)
-    {
-        if (lastPass == excludePass)
-        {
-            currentMinQueue = layeringInfo.RenderQueue;
-            currentMaxQueue = layeringInfo.RenderQueue;
-        }
-        else if (IsOpaque(layeringInfo))
-        {
-            // 对于不透明物体，取最小的RenderQueue（最先渲染）
-            currentMinQueue = Mathf.Min(currentMinQueue, layeringInfo.RenderQueue);
-        }
-        else
-        {
-            // 对于透明物体，取最大的RenderQueue（最后渲染）
-            currentMaxQueue = Mathf.Max(currentMaxQueue, layeringInfo.RenderQueue);
-        }
-        // 和上面的else if + else其实是等价的
-        // else
-        // {
-        //     currentMinQueue = Mathf.Min(currentMinQueue, layeringInfo.RenderQueue);
-        //     currentMaxQueue = Mathf.Max(currentMaxQueue, layeringInfo.RenderQueue);
-        // }
+        layerPassInfoPair.ClearRenderQueue();
     }
 
     /// <summary>
     /// Add Comment by White Hong - 2025-05-20 15:01:15
     /// 处理第一个层级的特殊情况
     /// <summary>
-    private static void ProcessFirstLayerSpecialCase(LayeringInfo layeringInfo, ref List<RendererBlock> destSequence,
-                                                    int currentMinQueue, int currentMaxQueue, int currentStencilRef,
-                                                    int viewID, LayerPassType excludePass)
+    private static void ProcessFirstLayerSpecialCase(ref List<RendererBlock> destSequence, ref LayerPassInfoPair layerPassInfoPair)
     {
-        if(layeringInfo.RenderPass != excludePass)
+        if(!layerPassInfoPair.IsCurExcludePass())
         {
-            AddRendererBlockNew(ref destSequence, layeringInfo, 0,
-                            currentMinQueue, currentMaxQueue, currentStencilRef,
-                            viewID, excludePass);
+            AddRendererBlockNew(ref destSequence, layerPassInfoPair.currentLayerInfo, ref layerPassInfoPair);
         }
     }
 
@@ -412,51 +417,48 @@ public partial class MapLayeringManager
         }
     }
 
-    private static void AddRendererBlockNew(ref List<RendererBlock> rendererSequence, LayeringInfo info, int infoIndex, int currentMinQueue,
-        int currentMaxQueue, int stencilRef, int viewID, LayerPassType excludePass)
+    private static void AddRendererBlockNew(ref List<RendererBlock> rendererSequence, LayeringInfo info, ref LayerPassInfoPair layerPassInfoPair)
     {
         GeometryType geoType = info.GeoType;
         OutputType output = info.Output;
 
         RendererBlockParam rendererBlockParam = new RendererBlockParam(info);
-        LevelInfo levelInfo = GetLevelsInfoByViewID(viewID);
+        LevelInfo levelInfo = GetLevelsInfoByViewID(layerPassInfoPair.viewID);
 
         //special case when rendering layer mask is k_LLNTransparent
         if ((rendererBlockParam.destRenderingLayerMask & k_LLNTransparent) != 0)
         {
-            CreateLLNTransparentStateBlock(ref rendererSequence, excludePass, currentMinQueue, currentMaxQueue,
-                                            stencilRef, rendererBlockParam);
+            CreateLLNTransparentStateBlock(ref rendererSequence, ref layerPassInfoPair, rendererBlockParam);
         }
         else
         {
-            CreateNormalStateBlock(ref rendererSequence, output, levelInfo, excludePass,
-                                    rendererBlockParam,
-                                    stencilRef, currentMinQueue, currentMaxQueue);
+            CreateNormalStateBlock(ref rendererSequence, output, levelInfo,
+                                    ref layerPassInfoPair, rendererBlockParam);
         }
         
         if (rendererBlockParam.needDepthWrite && geoType != GeometryType.None)
         {
-            underIndices[(int)geoType] = infoIndex;
+            underIndices[(int)geoType] = layerPassInfoPair.index;
         }
     }
 
-    private static void CreateLLNTransparentStateBlock(ref List<RendererBlock> rendererSequence, LayerPassType excludePass,
-                                                        int currentMinQueue, int currentMaxQueue,
-                                                        int stencilRef, RendererBlockParam rendererBlockParam)
+    private static void CreateLLNTransparentStateBlock(ref List<RendererBlock> rendererSequence,
+                                                        ref LayerPassInfoPair layerPassInfoPair,
+                                                        RendererBlockParam rendererBlockParam)
     {
         //Draw LLN Roads who's rendering layer is k_LLNTransparent twice
             //First pass draw it with depth write disabled
             //Second pass draw it with depth write enabled
             //note rendererSequence is reverted to actual execute order
-            if (excludePass == LayerPassType.PrePass)
+            if (layerPassInfoPair.excludePass == LayerPassType.PrePass)
             {
                 for (int i = 0; i < 2; i++)
                 {
                     RenderStateBlock renderStateBlock = LLNTransparentStateBlock(i == 1);
                     RendererBlock rendererBlock = new RendererBlock()
                     {
-                        minQueue = currentMinQueue,
-                        maxQueue = currentMaxQueue,
+                        minQueue = layerPassInfoPair.currentMinQueue,
+                        maxQueue = layerPassInfoPair.currentMaxQueue,
                         RenderStateBlock = renderStateBlock,
                         RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
                     };
@@ -477,7 +479,7 @@ public partial class MapLayeringManager
                 stencilState.failOperationFront = stencilState.failOperationBack = StencilOp.Keep;
                 renderStateBlock.blendState = blendState;
                 renderStateBlock.depthState = depthState;
-                int destStencilRef = stencilRef;
+                int destStencilRef = layerPassInfoPair.currentStencilRef;
                 
                 //Process stencil state for non sspr objects
                 stencilState.readMask = 127;
@@ -491,8 +493,8 @@ public partial class MapLayeringManager
                 
                 RendererBlock rendererBlock = new RendererBlock()
                 {
-                    minQueue = currentMinQueue,
-                    maxQueue = currentMaxQueue,
+                    minQueue = layerPassInfoPair.currentMinQueue,
+                    maxQueue = layerPassInfoPair.currentMaxQueue,
                     RenderStateBlock = renderStateBlock,
                     RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
                 };
@@ -501,9 +503,8 @@ public partial class MapLayeringManager
             }
     }
 
-    private static void CreateNormalStateBlock(ref List<RendererBlock> rendererSequence, OutputType output, LevelInfo levelInfo, LayerPassType excludePass,
-                                                RendererBlockParam rendererBlockParam,
-                                                int stencilRef, int currentMinQueue, int currentMaxQueue)
+    private static void CreateNormalStateBlock(ref List<RendererBlock> rendererSequence, OutputType output, LevelInfo levelInfo,
+                                                ref LayerPassInfoPair layerPassInfoPair, RendererBlockParam rendererBlockParam)
     {
         int levelCount = (rendererBlockParam.destRenderingLayerMask & levelInfo.levelAll) == 0 ? 1 : 3;
 
@@ -551,7 +552,7 @@ public partial class MapLayeringManager
             //     depthState.writeEnabled = true;
             // }
             
-            stencilRef = Mathf.Min(stencilRef, 31);
+            int stencilRef = Mathf.Min(layerPassInfoPair.currentStencilRef, 31);
             int destStencilReference = stencilRef;
             stencilState = new StencilState();
             stencilState.readMask = k_noLevelMask;
@@ -603,7 +604,7 @@ public partial class MapLayeringManager
             // }
             
             //Process stencil state for non sspr objects
-            if (excludePass == LayerPassType.Forward)
+            if (layerPassInfoPair.excludePass == LayerPassType.Forward)
             {
                 stencilState.readMask = 127;
                 stencilState.writeMask = 255;
@@ -623,13 +624,13 @@ public partial class MapLayeringManager
             
             RendererBlock rendererBlock = new RendererBlock()
             {
-                minQueue = currentMinQueue,
-                maxQueue = currentMaxQueue,
+                minQueue = layerPassInfoPair.currentMinQueue,
+                maxQueue = layerPassInfoPair.currentMaxQueue,
                 RenderStateBlock = renderStateBlock,
                 RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
             };
 
-            if((rendererBlockParam.isOpaque && output != OutputType.DepthOnlyMask)|| excludePass == LayerPassType.Forward)
+            if((rendererBlockParam.isOpaque && output != OutputType.DepthOnlyMask)|| layerPassInfoPair.excludePass == LayerPassType.Forward)
                 rendererSequence.Add(rendererBlock);
             else
                 _forwardRendererTransparentSequence.Add(rendererBlock);
