@@ -200,15 +200,22 @@ public partial class MapLayeringManager
             }
             else
             {
+                // 上一份layer数据是不处理的，直接刷新queue数据
                 if (lastPass == excludePass)
                 {
                     currentMinQueue = layerInfo.RenderQueue;
                     currentMaxQueue = layerInfo.RenderQueue;
                 }
+                // layer从后往前遍历，opaque物体进入list的时候使用renderqueue++，因此for循环是renderqueue是递减的，取最小值
                 else if (IsOpaque(layerInfo) && currentMinQueue > layerInfo.RenderQueue)
+                {
                     currentMinQueue = layerInfo.RenderQueue;
+                }
+                // layer从后往前遍历，transparent物体进入list的时候使用renderqueue--，因此for循环是renderqueue是递增的，取最大值
                 else if (!IsOpaque(layerInfo) && currentMaxQueue < layerInfo.RenderQueue)
+                {
                     currentMaxQueue = layerInfo.RenderQueue;
+                }
 
                 lastPass = layerInfo.RenderPass;
             }
