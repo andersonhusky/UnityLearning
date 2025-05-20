@@ -154,9 +154,11 @@ public partial class MapLayeringManager
 
         if(_layeringConfig.LayeringInfos.Count == 0)    return;
 
+        // 初始化状态变量
         InitializeStateVariables(out var currentMinQueue, out var currentMaxQueue,
                                 out var lastPass, out var currentStencilRef);
         
+        // 从后向前遍历层级信息
         for (int i = _layeringConfig.LayeringInfos.Count - 2; i >= 0; --i)
         {
             LayeringInfo currentLayerInfo = _layeringConfig.LayeringInfos[i];
@@ -176,6 +178,7 @@ public partial class MapLayeringManager
 
             lastPass = currentLayerInfo.RenderPass;
 
+            // 处理第一个层级的特殊情况
             if(i == 0)
             {
                 ProcessFirstLayerSpecialCase(currentLayerInfo, ref destSequence,
@@ -185,6 +188,10 @@ public partial class MapLayeringManager
         }
     }
 
+    /// <summary>
+    /// Add Comment by White Hong - 2025-05-20 14:59:19
+    /// 初始化状态变量
+    /// <summary>
     private static void InitializeStateVariables(out int currentMinQueue, out int currentMaxQueue,
                                                 out LayerPassType lastPass, out int currentStencilRef)
     {
@@ -196,6 +203,10 @@ public partial class MapLayeringManager
         RestIndices();
     }
 
+    /// <summary>
+    /// Add Comment by White Hong - 2025-05-20 15:00:42
+    /// 判断是否需要创建新的渲染块
+    /// <summary>
     private static bool ShouldCreateNewRenderBlock(LayeringInfo currentLayer, LayeringInfo previousLayer,
                                                 LayerPassType excludePass)
     {
@@ -206,6 +217,10 @@ public partial class MapLayeringManager
         return renderStateChange || isExcludePass || renderingLayerMaskChange;
     }
 
+    /// <summary>
+    /// Add Comment by White Hong - 2025-05-20 15:00:51
+    /// 处理渲染块创建逻辑
+    /// <summary>
     private static void ProcessRenderBlockCreation(ref List<RendererBlock> destSequence, LayeringInfo currentLayerInfo, LayeringInfo previousLayerInfo, int layerIndex,
                                                     ref int currentMinQueue, ref int currentMaxQueue, ref int currentStencilRef, int viewID,
                                                     LayerPassType excludePass, LayerPassType lastPass)
@@ -240,6 +255,10 @@ public partial class MapLayeringManager
         return condition1 || condition2 || condition3 || condition4;
     }
 
+    /// <summary>
+    /// Add Comment by White Hong - 2025-05-20 15:01:07
+    /// 更新渲染队列范围
+    /// <summary>
     private static void UpdateQueueRange(LayeringInfo layeringInfo, ref int currentMinQueue, ref int currentMaxQueue,
                                         LayerPassType excludePass, LayerPassType lastPass)
     {
@@ -266,6 +285,10 @@ public partial class MapLayeringManager
         // }
     }
 
+    /// <summary>
+    /// Add Comment by White Hong - 2025-05-20 15:01:15
+    /// 处理第一个层级的特殊情况
+    /// <summary>
     private static void ProcessFirstLayerSpecialCase(LayeringInfo layeringInfo, ref List<RendererBlock> destSequence,
                                                     int currentMinQueue, int currentMaxQueue, int currentStencilRef,
                                                     int viewID, LayerPassType excludePass)
