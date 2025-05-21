@@ -89,6 +89,11 @@ public struct LayeringInfo
     
     public int OpaqueIndexAbove;
     public int RenderQueue;
+
+    public string ToString()
+    {
+        return $"GeoType: {GeoType}, Output: {Output}, RenderPass: {RenderPass}, Mode: {Mode}, ShadingMode: {ShadingMode}, RenderingLayerMask: {RenderingLayerMask}, OpaqueIndexAbove: {OpaqueIndexAbove}, RenderQueue: {RenderQueue}";
+    }
 }
 
 public struct RendererBlock
