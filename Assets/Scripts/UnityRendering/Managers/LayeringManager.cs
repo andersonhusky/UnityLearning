@@ -129,11 +129,14 @@ public partial class MapLayeringManager
         public int levelAll;
     }
 
-    private static LevelInfo[] levelInfo = new LevelInfo[2] { new LevelInfo(), new LevelInfo() };
+    private static Dictionary<int, LevelInfo> m_levelInfos = new Dictionary<int, LevelInfo>();
     public static LevelInfo GetLevelsInfoByViewID(int viewID)
     {
-        viewID = viewID == 3 ? 1 : 0; // Minimap == 3 else == 0
-        return levelInfo[viewID];
+        if(!m_levelInfos.ContainsKey(viewID))
+        {
+            m_levelInfos[viewID] = new LevelInfo();
+        }
+        return m_levelInfos[viewID];
     }
 
     //To rendering three levels of data, the stencil value are rearranged now
