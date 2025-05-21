@@ -5,7 +5,8 @@ using UnityEngine;
 public class LayeringController : MonoBehaviour
 {
     public Material[] testPlaneMaterials;
-    public Material[] test3DObjectMaterials;
+    public Material[] test3DOpaqueObjectMaterials;
+    public Material[] test2DTransparentObjectMaterials;
     // Start is called before the first frame update
     void Start()
     {

@@ -145,6 +145,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         SetUpSharedInfos();
 
         SetUpClearTile();
+        SetUp2DObjects();
         SetUp3DObjects();
         SetUpAreas();
     }
@@ -172,6 +173,55 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         TestSettingToRenderBlock(LayerPassType.PrePass, clearQueue, 1, LayeringInfos.Last());
     }
 
+    private void SetUp2DObjects()
+    {
+        SetUp2DTransparent();
+    }
+
+    private void SetUp2DTransparent()
+    {
+        for(int i = 0; i < layeringController.test2DTransparentObjectMaterials.Length; ++i)
+        {
+            int objectQueue = transparentRenderQueue--;
+            SetQueue(layeringController.test2DTransparentObjectMaterials, i, objectQueue);
+            AddToList(new LayeringInfo()
+            {
+                GeoType = GeometryType.Grounded,
+                Output = OutputType.CommonTransparent,
+                RenderQueue = objectQueue,
+                RenderPass = LayerPassType.Forward,
+                RenderingLayerMask = Layer.k_Default,
+                OpaqueIndexAbove = opaqueElementIndexAbove,
+            });
+        }
+        TestSettingToRenderBlock(LayerPassType.PrePass, transparentRenderQueue + 1, 1, LayeringInfos.Last());
+    }
+
+    private void SetUp3DObjects()
+    {
+        SetUp3DOpaque();
+    }
+
+    private void SetUp3DOpaque()
+    {
+        opaqueRenderQueue = 2000;
+        for(int i = 0; i < layeringController.test3DOpaqueObjectMaterials.Length; ++i)
+        {
+            int objectQueue = opaqueRenderQueue++;
+            SetQueue(layeringController.test3DOpaqueObjectMaterials, i, objectQueue);
+            AddToList(new LayeringInfo()
+            {
+                GeoType = GeometryType.AboveGround,
+                Output = OutputType.CommonOpaque,
+                RenderQueue = objectQueue,
+                RenderPass = LayerPassType.All,
+                RenderingLayerMask = Layer.k_Default,
+                OpaqueIndexAbove = opaqueElementIndexAbove,
+            });
+        }
+        TestSettingToRenderBlock(LayerPassType.PrePass, opaqueRenderQueue - 1, 1, LayeringInfos.Last());
+    }
+
     private void SetUpAreas()
     {
         for(int i = 0; i < layeringController.testPlaneMaterials.Length; ++i)
@@ -189,27 +239,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 OpaqueIndexAbove = opaqueElementIndexAbove
             });
         }
-        TestSettingToRenderBlock(LayerPassType.PrePass, opaqueRenderQueue, 1, LayeringInfos.Last());
-    }
-
-    private void SetUp3DObjects()
-    {
-        opaqueRenderQueue = 2000;
-        for(int i = 0; i < layeringController.test3DObjectMaterials.Length; ++i)
-        {
-            int objectQueue = opaqueRenderQueue++;
-            SetQueue(layeringController.test3DObjectMaterials, i, objectQueue);
-            AddToList(new LayeringInfo()
-            {
-                GeoType = GeometryType.AboveGround,
-                Output = OutputType.CommonOpaque,
-                RenderQueue = objectQueue,
-                RenderPass = LayerPassType.All,
-                RenderingLayerMask = Layer.k_Default,
-                OpaqueIndexAbove = opaqueElementIndexAbove,
-            });
-        }
-        TestSettingToRenderBlock(LayerPassType.PrePass, opaqueRenderQueue, 1, LayeringInfos.Last());
+        TestSettingToRenderBlock(LayerPassType.PrePass, opaqueRenderQueue - 1, 1, LayeringInfos.Last());
     }
 
     private static bool SetQueue(Material[] materials, int index, int queue, string log = "")
