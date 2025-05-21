@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal.LibTessDotNet;
@@ -10,7 +11,7 @@ public partial class MapLayeringManager
 {
     public struct LayerPassInfoPair
     {
-        public LayerPassType excludePass;
+        public LayerPassType excludePass;   // 用exclude主要是为了All类型同时参与两个SetUpSequence
         public int viewID;
         public int currentMinQueue;
         public int currentMaxQueue;
@@ -19,6 +20,7 @@ public partial class MapLayeringManager
         public int index;
         public LayeringInfo currentLayerInfo;
         public LayeringInfo previousLayerInfo;
+        public bool IsLogBlock;
 
         public bool IsPrevExcludePass()
         {
@@ -253,6 +255,9 @@ public partial class MapLayeringManager
         _forwardRendererTransparentSequence.Clear();
         SetUpSequenceNew(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
         SetUpSequenceNew(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
+
+        // SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
+        // SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
     }
 
     private static int[] underIndices = new[] { -1, -1, -1 };
@@ -591,6 +596,12 @@ public partial class MapLayeringManager
             RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
         };
 
+        if(layerPassInfoPair.IsLogBlock)
+        {
+            LogRendererBlock(block);
+            return;
+        }
+
         if((rendererBlockParam.isOpaque && outputType != OutputType.DepthOnlyMask)
             || layerPassInfoPair.excludePass == LayerPassType.Forward)
         {
@@ -663,6 +674,44 @@ public partial class MapLayeringManager
         destRenderingLayerMask &= ~(int)k_NoSSPR_RenderingLayerMask;
         return noSSPR;
     }
+
+    #region 测试接口
+    public static void TestCreateRenderBlock(ref List<RendererBlock> rendererSequence, LayeringInfo info, ref LayerPassInfoPair layerPassInfoPair)
+    {
+        RendererBlockParam rendererBlockParam = new RendererBlockParam(info);
+
+        //special case when rendering layer mask is k_LLNTransparent
+        if ((rendererBlockParam.destRenderingLayerMask & k_LLNTransparent) != 0)
+        {
+            CreateLLNTransparentStateBlock(ref rendererSequence, ref layerPassInfoPair, rendererBlockParam);
+        }
+        else
+        {
+            OutputType output = info.Output;
+            CreateNormalStateBlock(ref rendererSequence, output,
+                                    ref layerPassInfoPair, rendererBlockParam);
+        }
+    }
+
+    private static void LogRendererBlock(RendererBlock block)
+    {
+        Debug.Log($"minQueue: {block.minQueue}, maxQueue: {block.maxQueue}, RenderingLayerMask: {block.RenderingLayerMask};\n" +
+                        $"blendState-       sourceColorBlendMode: {block.RenderStateBlock.blendState.blendState0.sourceColorBlendMode},\n" +
+                        $"                  sourceAlphaBlendMode: {block.RenderStateBlock.blendState.blendState0.sourceAlphaBlendMode},\n" +
+                        $"                  destinationColorBlendMode: {block.RenderStateBlock.blendState.blendState0.destinationColorBlendMode},\n" +
+                        $"                  destinationAlphaBlendMode: {block.RenderStateBlock.blendState.blendState0.destinationAlphaBlendMode},\n" +
+                        $"                  writeMask: {block.RenderStateBlock.blendState.blendState0.writeMask};\n" +
+                        $"depthState-       writeEnabled: {block.RenderStateBlock.depthState.writeEnabled},\n" +
+                        $"                  compareFunction: {block.RenderStateBlock.depthState.compareFunction};\n" +
+                        $"stencilState-     enabled: {block.RenderStateBlock.stencilState.enabled},\n" +
+                        $"                  readMask: {block.RenderStateBlock.stencilState.readMask},\n" +
+                        $"                  writeMask: {block.RenderStateBlock.stencilState.writeMask},\n" +
+                        $"                  compareFunctionFront: {block.RenderStateBlock.stencilState.compareFunctionFront},\n" +
+                        $"                  passOperationFront: {block.RenderStateBlock.stencilState.passOperationFront},\n" +
+                        $"                  failOperationFront: {block.RenderStateBlock.stencilState.failOperationFront},\n" +
+                        $"stencilReference-     stencilReference: {block.RenderStateBlock.stencilReference};");
+    }
+    #endregion
 
     #region 优化前的老代码
     public static void SetUpSequence(LayerPassType excludePass, ref List<RendererBlock> destSequence, int viewID)

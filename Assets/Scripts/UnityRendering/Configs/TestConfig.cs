@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.VisualScripting;
 using UnityEngine;
 
@@ -115,6 +116,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
     #region 测试用
     public static bool isDebug = false;
     private LayeringController layeringController;
+    private List<RendererBlock> rendererSequence = new List<RendererBlock>();
     #endregion
 
     public LayerRenderingConfiguration(LayeringController layerCtrl)
@@ -163,9 +165,11 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
             RenderQueue = clearQueue,
             RenderPass = LayerPassType.Forward,
             Mode = MapMode.MapAll,
-            RenderingLayerMask = Layer.k_Default,
+            RenderingLayerMask = Layer.k_3to13Level,
             OpaqueIndexAbove = opaqueElementIndexAbove
         });
+
+        TestSettingToRenderBlock(LayerPassType.PrePass, clearQueue, 1, LayeringInfos.Last());
     }
 
     private void SetUpAreas()
@@ -185,6 +189,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 OpaqueIndexAbove = opaqueElementIndexAbove
             });
         }
+        TestSettingToRenderBlock(LayerPassType.PrePass, opaqueRenderQueue, 1, LayeringInfos.Last());
     }
 
     private void SetUp3DObjects()
@@ -204,6 +209,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 OpaqueIndexAbove = opaqueElementIndexAbove,
             });
         }
+        TestSettingToRenderBlock(LayerPassType.PrePass, opaqueRenderQueue, 1, LayeringInfos.Last());
     }
 
     private static bool SetQueue(Material[] materials, int index, int queue, string log = "")
@@ -252,5 +258,18 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
             || output == OutputType.OverlayDefault
             || output == OutputType.OverlayTransparent
             || output == OutputType.Custom;
+    }
+
+    private void TestSettingToRenderBlock(LayerPassType excludePass, int queue, int stencilRef, LayeringInfo layeringInfo)
+    {
+        MapLayeringManager.LayerPassInfoPair layerPassInfoPair = new MapLayeringManager.LayerPassInfoPair
+        {
+            excludePass = excludePass,
+            currentMinQueue = queue,
+            currentMaxQueue = queue,
+            currentStencilRef = stencilRef,
+            IsLogBlock = true
+        };
+        MapLayeringManager.TestCreateRenderBlock(ref rendererSequence, layeringInfo, ref layerPassInfoPair);
     }
 }
