@@ -85,7 +85,7 @@ public struct LayeringInfo
     public LayerPassType RenderPass;
     public MapMode Mode;
     public ShadingMode ShadingMode;
-    public uint RenderingLayerMask;
+    public uint RenderingLayerMask;             // 存储feature和地图level之间的关系
     
     public int OpaqueIndexAbove;
     public int RenderQueue;

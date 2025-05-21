@@ -121,6 +121,8 @@ public partial class MapLayeringManager
     public static List<RendererBlock> _forwardRendererTransparentSequence = new List<RendererBlock>();
     public static List<RendererBlock> _prepassRendererSequence = new List<RendererBlock>();
 
+    // levels存三个数，高一级别level，当前level，低一级别level，不存在时为-1
+    // levelAll用位存这三个数（有效时），1<<高一级别level，1 << 当前level，1 << 低一级别level
     public class LevelInfo
     {
         public List<int> levels = new List<int>();
@@ -429,7 +431,7 @@ public partial class MapLayeringManager
         else
         {
             OutputType output = info.Output;
-            CreateNormalStateBlock(ref rendererSequence, output,
+            CreateNormalStateBlockNew(ref rendererSequence, output,
                                     ref layerPassInfoPair, rendererBlockParam);
         }
 
@@ -498,6 +500,182 @@ public partial class MapLayeringManager
             };
 
             rendererSequence.Add(rendererBlock);
+        }
+    }
+
+    private static void CreateNormalStateBlockNew(ref List<RendererBlock> rendererSequence, OutputType output,
+                                                ref LayerPassInfoPair layerPassInfoPair, RendererBlockParam rendererBlockParam)
+    {
+        LevelInfo levelInfo = GetLevelsInfoByViewID(layerPassInfoPair.viewID);      // minimap使用levelInfo[1]，其他levelInfo[0]
+        int levelCount = (rendererBlockParam.destRenderingLayerMask & levelInfo.levelAll) == 0 ? 1 : 3;
+
+        //Once we have multi-level data, need different rendering layer mask and stencil value for each level
+        for (int levelIndex = 0; levelIndex < levelCount; levelIndex++)
+        {
+            if (levelCount != 1)
+            {
+                rendererBlockParam.destRenderingLayerMask = levelInfo.levels[levelIndex];
+            }
+
+            if (rendererBlockParam.destRenderingLayerMask < 0)
+            {
+                continue;
+            }
+
+            RenderStateBlock stateBlock = BuildLayerRenderState(
+                output,
+                levelIndex,
+                levelCount,
+                ref layerPassInfoPair,
+                rendererBlockParam
+            );
+
+            AddToRenderQueue(
+                ref rendererSequence,
+                output,
+                rendererBlockParam,
+                layerPassInfoPair,
+                stateBlock
+            );
+        }
+    }
+
+    private static RenderStateBlock BuildLayerRenderState(OutputType outputType, int layerIndex, int totalLayers,
+                                                            ref LayerPassInfoPair layerPassInfoPair, RendererBlockParam rendererBlockParam)
+    {
+        return new RenderStateBlock
+        {
+            blendState = CreateBlendState(outputType, rendererBlockParam),
+            depthState = CreateDepthState(rendererBlockParam),
+            stencilState = CreateStencilState(
+                outputType,
+                layerIndex,
+                totalLayers,
+                ref layerPassInfoPair,
+                rendererBlockParam,
+                out int stencilRef
+            ),
+            stencilReference = stencilRef,
+            mask = DetermineStateMask(outputType)
+        };
+    }
+
+    private static BlendState CreateBlendState(OutputType output, RendererBlockParam rendererBlockParam)
+    {
+        bool isMask = output == OutputType.DepthOnlyMask
+                    || output == OutputType.StencilOnlyMask;
+        
+        return rendererBlockParam.isOpaque
+                ? (isMask ? BlendStateOpaqueNoColor : BlendStateOpaque)
+                : BlendStateTransparent;
+    }
+
+    private static DepthState CreateDepthState(RendererBlockParam rendererBlockParam)
+    {
+        return new DepthState
+        {
+            writeEnabled = rendererBlockParam.needDepthWrite,
+            compareFunction = rendererBlockParam.needDepthTest
+                                ? CompareFunction.LessEqual
+                                : CompareFunction.Always
+        };
+    }
+
+    private static StencilState CreateStencilState(OutputType output, int layerIndex, int totalLayers, ref LayerPassInfoPair layerPassInfoPair,
+                                                    RendererBlockParam rendererBlockParam, out int stencilValue)
+    {
+        int stencilRef = Mathf.Min(layerPassInfoPair.currentStencilRef, 31);
+        stencilValue = stencilRef;
+
+        var state = new StencilState
+        {
+            enabled = true,
+            readMask = k_noLevelMask,
+            writeMask = k_noLevelMask,
+        };
+        state.SetCompareFunction(
+            rendererBlockParam.needDepthTest
+            ? rendererBlockParam.is3D ? CompareFunction.GreaterEqual : CompareFunction.Greater
+            : CompareFunction.Always
+        );
+        state.SetPassOperation(
+            rendererBlockParam.needStencilWrite ? StencilOp.Replace : StencilOp.Keep
+        );
+        state.SetFailOperation(
+            StencilOp.Keep
+        );
+
+        if(totalLayers == 3)
+        {
+            ConfigureStencilForMultiLayer(output, layerIndex, totalLayers, stencilRef,
+                                            ref state, ref stencilValue);
+        }
+
+        if (layerPassInfoPair.excludePass == LayerPassType.Forward)
+        {
+            state.readMask = 127;
+            state.writeMask = 255;
+            if (rendererBlockParam.noSSPR)
+                stencilValue |= k_noSSPR_StencilMask;
+        }
+
+        return state;
+    }
+
+    private static void ConfigureStencilForMultiLayer(OutputType output, int layerIndex, int totalLayers, int stencilRef,
+                                                        ref StencilState state, ref int stencilValue)
+    {
+        state.SetCompareFunction(CompareFunction.Greater);
+        state.SetPassOperation(StencilOp.Replace);
+
+        if(output == OutputType.StencilOnlyMask)
+        {
+            state.readMask = k_levelMaskAll;
+            state.writeMask = k_levelMaskAll;
+            stencilValue = k_levelMasks[layerIndex];
+        }
+        else
+        {
+            state.readMask = 255;
+            state.writeMask = 255;
+            stencilValue = k_levelMasks[layerIndex] | stencilRef;
+        }
+    }
+
+    private static RenderStateMask DetermineStateMask(OutputType outputType)
+    {
+        var mask = RenderStateMask.Depth | RenderStateMask.Stencil;
+
+        // 默认混合类型不需要特别设置混合状态
+        bool isDefaultBlend = outputType == OutputType.CommonDefault
+                            || outputType == OutputType.OverlayDefault;
+        if(!isDefaultBlend)
+        {
+            mask |= RenderStateMask.Blend;
+        }
+
+        return mask;
+    }
+
+    private static void AddToRenderQueue(ref List<RendererBlock> queue, OutputType outputType, RendererBlockParam rendererBlockParam,
+                                        LayerPassInfoPair layerPassInfoPair, RenderStateBlock state)
+    {
+        var block = new RendererBlock
+        {
+            minQueue = layerPassInfoPair.currentMinQueue,
+            maxQueue = layerPassInfoPair.currentMaxQueue,
+            RenderStateBlock = state,
+            RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
+        };
+
+        if((rendererBlockParam.isOpaque && outputType != OutputType.DepthOnlyMask)
+            || layerPassInfoPair.excludePass == LayerPassType.Forward)
+        {
+            queue.Add(block);
+        }
+        else
+        {
+            _forwardRendererTransparentSequence.Add(block);
         }
     }
 
