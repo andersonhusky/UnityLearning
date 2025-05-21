@@ -253,11 +253,11 @@ public partial class MapLayeringManager
             return;
 
         _forwardRendererTransparentSequence.Clear();
-        SetUpSequenceNew(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
-        SetUpSequenceNew(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
+        // SetUpSequenceNew(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
+        // SetUpSequenceNew(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
 
-        // SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
-        // SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
+        SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
+        SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
     }
 
     private static int[] underIndices = new[] { -1, -1, -1 };
@@ -313,6 +313,7 @@ public partial class MapLayeringManager
         layerPassInfoPair.currentMinQueue = lastLayer.RenderQueue;
         layerPassInfoPair.currentMaxQueue = lastLayer.RenderQueue;
         layerPassInfoPair.currentStencilRef = 1;
+        layerPassInfoPair.IsLogBlock = true;
         RestIndices();
     }
 
@@ -599,7 +600,6 @@ public partial class MapLayeringManager
         if(layerPassInfoPair.IsLogBlock)
         {
             LogRendererBlock(block);
-            return;
         }
 
         if((rendererBlockParam.isOpaque && outputType != OutputType.DepthOnlyMask)

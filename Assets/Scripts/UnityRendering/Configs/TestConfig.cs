@@ -298,7 +298,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
             currentMinQueue = queue,
             currentMaxQueue = queue,
             currentStencilRef = stencilRef,
-            IsLogBlock = true
+            // IsLogBlock = true
         };
         MapLayeringManager.TestCreateRenderBlock(ref rendererSequence, layeringInfo, ref layerPassInfoPair);
     }
