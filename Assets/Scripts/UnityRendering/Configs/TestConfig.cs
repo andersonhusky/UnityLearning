@@ -142,6 +142,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         transparentRenderQueue = 2500;
         SetUpSharedInfos();
 
+        SetUpClearTile();
         SetUp3DObjects();
         SetUpAreas();
     }
@@ -149,6 +150,22 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
     private void SetUpSharedInfos()
     {
         meshParts = Enum.GetValues(typeof(MeshPart));
+    }
+
+    private void SetUpClearTile()
+    {
+        int clearQueue = opaqueRenderQueue++;
+
+        AddToList(new LayeringInfo()
+        {
+            GeoType = GeometryType.Grounded,
+            Output = OutputType.StencilOnlyMask,
+            RenderQueue = clearQueue,
+            RenderPass = LayerPassType.Forward,
+            Mode = MapMode.MapAll,
+            RenderingLayerMask = Layer.k_Default,
+            OpaqueIndexAbove = opaqueElementIndexAbove
+        });
     }
 
     private void SetUpAreas()
