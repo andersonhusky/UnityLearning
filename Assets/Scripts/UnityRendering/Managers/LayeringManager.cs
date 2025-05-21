@@ -662,7 +662,7 @@ public partial class MapLayeringManager
     }
 
     #region 优化前的老代码
-        public static void SetUpSequence(LayerPassType excludePass, ref List<RendererBlock> destSequence, int viewID)
+    public static void SetUpSequence(LayerPassType excludePass, ref List<RendererBlock> destSequence, int viewID)
     {
         destSequence.Clear();
 
