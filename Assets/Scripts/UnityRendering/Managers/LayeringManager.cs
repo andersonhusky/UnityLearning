@@ -339,86 +339,6 @@ public partial class MapLayeringManager
         }
     }
 
-    public static void SetUpSequence(LayerPassType excludePass, ref List<RendererBlock> destSequence, int viewID)
-    {
-        destSequence.Clear();
-
-        //List<MapLayerType> historyTypes = new List<MapLayerType>();
-        int layerCount = _layeringConfig.LayeringInfos.Count;
-
-        LayeringInfo lastLayeringInfo = _layeringConfig.LayeringInfos[layerCount - 1];
-        int currentMinQueue = lastLayeringInfo.RenderQueue;
-        int currentMaxQueue = lastLayeringInfo.RenderQueue;
-        //MapLayerType lastLayerType = lastLayeringInfo.LayerType;
-        LayerPassType lastPass = lastLayeringInfo.RenderPass;
-        int currentStencilRef = 1;
-        RestIndices();
-
-        for (int i = layerCount - 2; i >= 0; i--)
-        {
-            LayeringInfo layerInfo = _layeringConfig.LayeringInfos[i];
-            LayeringInfo prevLayerInfo = _layeringConfig.LayeringInfos[i + 1];
-
-            //MapLayerType layerType = layerInfo.LayerType;
-            OutputType outputType = layerInfo.Output;
-
-            //When depth test can not handle element layering we use stencil
-            // - Elements with same depth layering each other
-            // - Elements can not use depth test but need to be covered by other elements
-
-            bool renderStateChanged = prevLayerInfo.Output != layerInfo.Output || prevLayerInfo.GeoType != layerInfo.GeoType;
-
-            //If current layering info is different from previous one, add render block based on previous info context with block queue range
-            if (renderStateChanged || layerInfo.RenderPass == excludePass || prevLayerInfo.RenderingLayerMask != layerInfo.RenderingLayerMask)
-            {
-                if (lastPass != excludePass)
-                {
-                    bool needIncrementStencil = IsOpaque(prevLayerInfo) && !IsOpaque(layerInfo);
-                    needIncrementStencil |= IsOpaque(prevLayerInfo) && Is3D(prevLayerInfo) && !Is3D(layerInfo);
-                    needIncrementStencil |= Is3D(layerInfo) && layerInfo.Output == OutputType.OverlayOpaque && Is3D(prevLayerInfo);
-                    needIncrementStencil |= prevLayerInfo.Output == OutputType.StencilOnlyMask || layerInfo.Output == OutputType.DepthOnlyMask;
-
-                    AddRendererBlock(ref destSequence, prevLayerInfo, i + 1, currentMinQueue, currentMaxQueue, currentStencilRef, viewID, excludePass);
-                    if (needIncrementStencil)
-                    {
-                        currentStencilRef++;
-                    }
-                }
-
-                currentMinQueue = layerInfo.RenderQueue;
-                currentMaxQueue = layerInfo.RenderQueue;
-
-                lastPass = layerInfo.RenderPass;
-            }
-            else
-            {
-                // 上一份layer数据是不处理的，直接刷新queue数据
-                if (lastPass == excludePass)
-                {
-                    currentMinQueue = layerInfo.RenderQueue;
-                    currentMaxQueue = layerInfo.RenderQueue;
-                }
-                // layer从后往前遍历，opaque物体进入list的时候使用renderqueue++，因此for循环是renderqueue是递减的，取最小值
-                else if (IsOpaque(layerInfo) && currentMinQueue > layerInfo.RenderQueue)
-                {
-                    currentMinQueue = layerInfo.RenderQueue;
-                }
-                // layer从后往前遍历，transparent物体进入list的时候使用renderqueue--，因此for循环是renderqueue是递增的，取最大值
-                else if (!IsOpaque(layerInfo) && currentMaxQueue < layerInfo.RenderQueue)
-                {
-                    currentMaxQueue = layerInfo.RenderQueue;
-                }
-
-                lastPass = layerInfo.RenderPass;
-            }
-
-            if (i == 0 && layerInfo.RenderPass != excludePass)
-            {
-                AddRendererBlock(ref destSequence, layerInfo, 0, currentMinQueue, currentMaxQueue, currentStencilRef, viewID, excludePass);
-            }
-        }
-    }
-
     private static void AddRendererBlockNew(ref List<RendererBlock> rendererSequence, LayeringInfo info, ref LayerPassInfoPair layerPassInfoPair)
     {
         RendererBlockParam rendererBlockParam = new RendererBlockParam(info);
@@ -679,6 +599,148 @@ public partial class MapLayeringManager
         }
     }
 
+    private static bool IsOpaque(LayeringInfo info)
+    {
+        return info.Output == OutputType.CommonOpaque || info.Output == OutputType.OverlayOpaque ||
+               info.Output == OutputType.DepthOnlyMask || info.Output == OutputType.StencilOnlyMask;
+    }
+
+    private static bool Is3D(LayeringInfo info)
+    {
+        return info.GeoType != GeometryType.Grounded;
+    }
+
+    private static void RestIndices()
+    {
+        underIndices[0] = -1;
+        underIndices[1] = -1;
+        underIndices[2] = -1;
+    }
+
+    private static bool IsNeedDepthWrite(OutputType outputType)
+    {
+        return outputType == OutputType.CommonOpaque
+                || outputType == OutputType.OverlayOpaque
+                || outputType == OutputType.DepthOnlyMask;
+    }
+
+    private static bool IsNeedDepthTest(OutputType outputType, GeometryType geometryType)
+    {
+        return outputType == OutputType.CommonOpaque
+                || outputType == OutputType.CommonTransparent
+                || (outputType == OutputType.OverlayOpaque && geometryType > GeometryType.Grounded)  //Like if car draw in layering forward pass
+                || outputType == OutputType.CommonDefault
+                || (outputType == OutputType.DepthOnlyMask && geometryType != GeometryType.Grounded);   //Like water bottom
+    }
+
+    private static bool IsNeedStencilTest(bool needDepthTest, bool hasDepthConflict, bool isOpaque,
+                                        OutputType outputType, GeometryType geometryType, int opaqueIndexAbove)
+    {
+        return (needDepthTest && hasDepthConflict)
+                || outputType == OutputType.StencilOnlyMask
+                || (outputType == OutputType.DepthOnlyMask && geometryType == GeometryType.Grounded)
+                || (opaqueIndexAbove >= 0 && !isOpaque);
+    }
+
+    private static bool IsNeedStencilWrite(bool isOpaque, OutputType outputType)
+    {
+        return isOpaque && (outputType != OutputType.DepthOnlyMask);
+    }
+
+    private static bool IsNoSSPR(ref int destRenderingLayerMask)
+    {
+        bool noSSPR = (destRenderingLayerMask & k_NoSSPR_RenderingLayerMask) != 0;
+
+        // Remove nosspr bit to avoid unwanted draw of element with same render queue and overlapped rendering layer mask bit
+        // Example: LLN roads above zero has the same queue with LLN roads equal/under zero
+        //          They both have k_NoSSPR bit in rendering layer mask
+        //          LLN>0 exits in transparent queue, but LLN<=0 exits in opaque queue
+        //          They both get repetitive draw because they have same render queue and both have k_NoSSPR bit
+        // The perfect solution should be only one bit in the rendering layer mask.
+        destRenderingLayerMask &= ~(int)k_NoSSPR_RenderingLayerMask;
+        return noSSPR;
+    }
+
+    #region 优化前的老代码
+        public static void SetUpSequence(LayerPassType excludePass, ref List<RendererBlock> destSequence, int viewID)
+    {
+        destSequence.Clear();
+
+        //List<MapLayerType> historyTypes = new List<MapLayerType>();
+        int layerCount = _layeringConfig.LayeringInfos.Count;
+
+        LayeringInfo lastLayeringInfo = _layeringConfig.LayeringInfos[layerCount - 1];
+        int currentMinQueue = lastLayeringInfo.RenderQueue;
+        int currentMaxQueue = lastLayeringInfo.RenderQueue;
+        //MapLayerType lastLayerType = lastLayeringInfo.LayerType;
+        LayerPassType lastPass = lastLayeringInfo.RenderPass;
+        int currentStencilRef = 1;
+        RestIndices();
+
+        for (int i = layerCount - 2; i >= 0; i--)
+        {
+            LayeringInfo layerInfo = _layeringConfig.LayeringInfos[i];
+            LayeringInfo prevLayerInfo = _layeringConfig.LayeringInfos[i + 1];
+
+            //MapLayerType layerType = layerInfo.LayerType;
+            OutputType outputType = layerInfo.Output;
+
+            //When depth test can not handle element layering we use stencil
+            // - Elements with same depth layering each other
+            // - Elements can not use depth test but need to be covered by other elements
+
+            bool renderStateChanged = prevLayerInfo.Output != layerInfo.Output || prevLayerInfo.GeoType != layerInfo.GeoType;
+
+            //If current layering info is different from previous one, add render block based on previous info context with block queue range
+            if (renderStateChanged || layerInfo.RenderPass == excludePass || prevLayerInfo.RenderingLayerMask != layerInfo.RenderingLayerMask)
+            {
+                if (lastPass != excludePass)
+                {
+                    bool needIncrementStencil = IsOpaque(prevLayerInfo) && !IsOpaque(layerInfo);
+                    needIncrementStencil |= IsOpaque(prevLayerInfo) && Is3D(prevLayerInfo) && !Is3D(layerInfo);
+                    needIncrementStencil |= Is3D(layerInfo) && layerInfo.Output == OutputType.OverlayOpaque && Is3D(prevLayerInfo);
+                    needIncrementStencil |= prevLayerInfo.Output == OutputType.StencilOnlyMask || layerInfo.Output == OutputType.DepthOnlyMask;
+
+                    AddRendererBlock(ref destSequence, prevLayerInfo, i + 1, currentMinQueue, currentMaxQueue, currentStencilRef, viewID, excludePass);
+                    if (needIncrementStencil)
+                    {
+                        currentStencilRef++;
+                    }
+                }
+
+                currentMinQueue = layerInfo.RenderQueue;
+                currentMaxQueue = layerInfo.RenderQueue;
+
+                lastPass = layerInfo.RenderPass;
+            }
+            else
+            {
+                // 上一份layer数据是不处理的，直接刷新queue数据
+                if (lastPass == excludePass)
+                {
+                    currentMinQueue = layerInfo.RenderQueue;
+                    currentMaxQueue = layerInfo.RenderQueue;
+                }
+                // layer从后往前遍历，opaque物体进入list的时候使用renderqueue++，因此for循环是renderqueue是递减的，取最小值
+                else if (IsOpaque(layerInfo) && currentMinQueue > layerInfo.RenderQueue)
+                {
+                    currentMinQueue = layerInfo.RenderQueue;
+                }
+                // layer从后往前遍历，transparent物体进入list的时候使用renderqueue--，因此for循环是renderqueue是递增的，取最大值
+                else if (!IsOpaque(layerInfo) && currentMaxQueue < layerInfo.RenderQueue)
+                {
+                    currentMaxQueue = layerInfo.RenderQueue;
+                }
+
+                lastPass = layerInfo.RenderPass;
+            }
+
+            if (i == 0 && layerInfo.RenderPass != excludePass)
+            {
+                AddRendererBlock(ref destSequence, layerInfo, 0, currentMinQueue, currentMaxQueue, currentStencilRef, viewID, excludePass);
+            }
+        }
+    }
     private static void AddRendererBlock(ref List<RendererBlock> rendererSequence, LayeringInfo info, int infoIndex, int currentMinQueue,
         int currentMaxQueue, int stencilRef, int viewID, LayerPassType excludePass)
     {
@@ -1037,66 +1099,5 @@ public partial class MapLayeringManager
 
         return renderStateBlock;
     }
-
-    private static bool IsOpaque(LayeringInfo info)
-    {
-        return info.Output == OutputType.CommonOpaque || info.Output == OutputType.OverlayOpaque ||
-               info.Output == OutputType.DepthOnlyMask || info.Output == OutputType.StencilOnlyMask;
-    }
-
-    private static bool Is3D(LayeringInfo info)
-    {
-        return info.GeoType != GeometryType.Grounded;
-    }
-
-    private static void RestIndices()
-    {
-        underIndices[0] = -1;
-        underIndices[1] = -1;
-        underIndices[2] = -1;
-    }
-
-    private static bool IsNeedDepthWrite(OutputType outputType)
-    {
-        return outputType == OutputType.CommonOpaque
-                || outputType == OutputType.OverlayOpaque
-                || outputType == OutputType.DepthOnlyMask;
-    }
-
-    private static bool IsNeedDepthTest(OutputType outputType, GeometryType geometryType)
-    {
-        return outputType == OutputType.CommonOpaque
-                || outputType == OutputType.CommonTransparent
-                || (outputType == OutputType.OverlayOpaque && geometryType > GeometryType.Grounded)  //Like if car draw in layering forward pass
-                || outputType == OutputType.CommonDefault
-                || (outputType == OutputType.DepthOnlyMask && geometryType != GeometryType.Grounded);   //Like water bottom
-    }
-
-    private static bool IsNeedStencilTest(bool needDepthTest, bool hasDepthConflict, bool isOpaque,
-                                        OutputType outputType, GeometryType geometryType, int opaqueIndexAbove)
-    {
-        return (needDepthTest && hasDepthConflict)
-                || outputType == OutputType.StencilOnlyMask
-                || (outputType == OutputType.DepthOnlyMask && geometryType == GeometryType.Grounded)
-                || (opaqueIndexAbove >= 0 && !isOpaque);
-    }
-
-    private static bool IsNeedStencilWrite(bool isOpaque, OutputType outputType)
-    {
-        return isOpaque && (outputType != OutputType.DepthOnlyMask);
-    }
-
-    private static bool IsNoSSPR(ref int destRenderingLayerMask)
-    {
-        bool noSSPR = (destRenderingLayerMask & k_NoSSPR_RenderingLayerMask) != 0;
-
-        // Remove nosspr bit to avoid unwanted draw of element with same render queue and overlapped rendering layer mask bit
-        // Example: LLN roads above zero has the same queue with LLN roads equal/under zero
-        //          They both have k_NoSSPR bit in rendering layer mask
-        //          LLN>0 exits in transparent queue, but LLN<=0 exits in opaque queue
-        //          They both get repetitive draw because they have same render queue and both have k_NoSSPR bit
-        // The perfect solution should be only one bit in the rendering layer mask.
-        destRenderingLayerMask &= ~(int)k_NoSSPR_RenderingLayerMask;
-        return noSSPR;
-    }
+    #endregion
 }
