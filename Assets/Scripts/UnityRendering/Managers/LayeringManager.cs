@@ -253,11 +253,11 @@ public partial class MapLayeringManager
             return;
 
         _forwardRendererTransparentSequence.Clear();
-        // SetUpSequenceNew(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
-        // SetUpSequenceNew(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
+        SetUpSequenceNew(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
+        SetUpSequenceNew(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
 
-        SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
-        SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
+        // SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
+        // SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
     }
 
     private static int[] underIndices = new[] { -1, -1, -1 };
@@ -523,7 +523,7 @@ public partial class MapLayeringManager
             writeMask = k_noLevelMask,
         };
         state.SetCompareFunction(
-            rendererBlockParam.needDepthTest
+            rendererBlockParam.needStencilTest
             ? rendererBlockParam.is3D ? CompareFunction.GreaterEqual : CompareFunction.Greater
             : CompareFunction.Always
         );
@@ -1020,6 +1020,8 @@ public partial class MapLayeringManager
                     RenderStateBlock = renderStateBlock,
                     RenderingLayerMask = (uint)destRenderingLayerMask
                 };
+
+                LogRendererBlock(rendererBlock);
 
                 if ((isOpaque && output != OutputType.DepthOnlyMask) || excludePass == LayerPassType.Forward)
                     rendererSequence.Add(rendererBlock);

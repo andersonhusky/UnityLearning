@@ -115,6 +115,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     #region 测试用
     public static bool isDebug = false;
+    public static bool isLogRenderBlock = false;
     private LayeringController layeringController;
     private List<RendererBlock> rendererSequence = new List<RendererBlock>();
     #endregion
@@ -292,13 +293,15 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     private void TestSettingToRenderBlock(LayerPassType excludePass, int queue, int stencilRef, LayeringInfo layeringInfo)
     {
+        if(!isLogRenderBlock)    return;
+
         MapLayeringManager.LayerPassInfoPair layerPassInfoPair = new MapLayeringManager.LayerPassInfoPair
         {
             excludePass = excludePass,
             currentMinQueue = queue,
             currentMaxQueue = queue,
             currentStencilRef = stencilRef,
-            // IsLogBlock = true
+            IsLogBlock = true
         };
         MapLayeringManager.TestCreateRenderBlock(ref rendererSequence, layeringInfo, ref layerPassInfoPair);
     }
