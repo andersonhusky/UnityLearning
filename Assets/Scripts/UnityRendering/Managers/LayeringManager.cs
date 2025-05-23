@@ -256,8 +256,8 @@ public partial class MapLayeringManager
         SetUpSequenceNew(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
         SetUpSequenceNew(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
 
-        // SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
-        // SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
+    //     SetUpSequence(LayerPassType.PrePass, ref _forwardRendererSequence, viewID);
+    //     SetUpSequence(LayerPassType.Forward, ref _prepassRendererSequence, viewID);
     }
 
     private static int[] underIndices = new[] { -1, -1, -1 };
