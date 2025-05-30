@@ -145,7 +145,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         transparentRenderQueue = 2500;
         SetUpSharedInfos();
 
-        SetUpClearTile();
+        // SetUpClearTile();
         SetUp2DObjects();
         SetUp3DObjects();
         SetUpAreas();
@@ -185,16 +185,16 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         {
             int objectQueue = transparentRenderQueue--;
             SetQueue(layeringController.test2DTransparentObjectMaterials, i, objectQueue);
-            // AddToList(new LayeringInfo()
-            // {
-            //     GeoType = GeometryType.Arbitrary,
-            //     Output = OutputType.CommonTransparent,
-            //     RenderQueue = objectQueue,
-            //     RenderPass = LayerPassType.Forward,
-            //     Mode = MapMode.Map3D,
-            //     RenderingLayerMask = Layer.k_Default,
-            //     OpaqueIndexAbove = opaqueElementIndexAbove,
-            // });
+            AddToList(new LayeringInfo()
+            {
+                GeoType = GeometryType.Arbitrary,
+                Output = OutputType.CommonTransparent,
+                RenderQueue = objectQueue,
+                RenderPass = LayerPassType.Forward,
+                Mode = MapMode.Map3D,
+                RenderingLayerMask = Layer.k_Default,
+                OpaqueIndexAbove = opaqueElementIndexAbove,
+            });
         }
         TestSettingToRenderBlock(LayerPassType.PrePass, transparentRenderQueue + 1, 1, LayeringInfos.Last());
     }

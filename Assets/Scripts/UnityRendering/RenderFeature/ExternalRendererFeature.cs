@@ -65,6 +65,14 @@ public class ExternalRendererFeature : ScriptableRendererFeature
         };
     }
 
+    public override void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData)
+    {
+        externalPass.Setup(
+            renderer.cameraColorTargetHandle,
+            renderer.cameraDepthTargetHandle
+        );
+    }
+
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
         renderer.EnqueuePass(externalPass);
