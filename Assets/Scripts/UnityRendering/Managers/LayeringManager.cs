@@ -391,6 +391,10 @@ public partial class MapLayeringManager
                     RenderStateBlock = renderStateBlock,
                     RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
                 };
+                if(layerPassInfoPair.IsLogBlock)
+                {
+                    LogRendererBlock(rendererBlock);
+                }
                 _forwardRendererTransparentSequence.Add(rendererBlock);
             }
         }
@@ -427,6 +431,10 @@ public partial class MapLayeringManager
                 RenderStateBlock = renderStateBlock,
                 RenderingLayerMask = (uint)rendererBlockParam.destRenderingLayerMask
             };
+            if(layerPassInfoPair.IsLogBlock)
+            {
+                LogRendererBlock(rendererBlock);
+            }
 
             rendererSequence.Add(rendererBlock);
         }

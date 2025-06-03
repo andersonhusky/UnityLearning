@@ -177,6 +177,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
     private void SetUpTransparentObjects()
     {
         SetUp2DTransparent();
+        SetUpLLNTransparent();
     }
 
     /// <summary>
@@ -197,6 +198,26 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 RenderPass = LayerPassType.Forward,
                 Mode = MapMode.Map3D,
                 RenderingLayerMask = Layer.k_Default,
+                OpaqueIndexAbove = opaqueElementIndexAbove,
+            });
+        }
+        TestSettingToRenderBlock(LayerPassType.PrePass, transparentRenderQueue + 1, 1, LayeringInfos.Last());
+    }
+
+    private void SetUpLLNTransparent()
+    {
+        for (int i = 0; i < layeringController.testLLNTransparentObjectMaterials.Length; ++i)
+        {
+            int objectQueue = transparentRenderQueue--;
+            SetQueue(layeringController.testLLNTransparentObjectMaterials, i, objectQueue);
+            AddToList(new LayeringInfo()
+            {
+                GeoType = GeometryType.Arbitrary,
+                Output = OutputType.Custom,
+                RenderQueue = objectQueue,
+                RenderPass = LayerPassType.Forward,
+                Mode = MapMode.Map3D,
+                RenderingLayerMask = Layer.k_LLNTransparent | Layer.k_NoSSPR,
                 OpaqueIndexAbove = opaqueElementIndexAbove,
             });
         }
@@ -244,6 +265,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 OpaqueIndexAbove = opaqueElementIndexAbove
             });
         }
+        TestSettingToRenderBlock(LayerPassType.PrePass, transparentRenderQueue + 1, 1, LayeringInfos.Last());
     }
 
     private void SetUpOverlayOpaque()
