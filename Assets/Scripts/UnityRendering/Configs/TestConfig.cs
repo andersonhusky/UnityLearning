@@ -146,10 +146,9 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         SetUpSharedInfos();
 
         SetUpClearTile();
-        SetUp2DObjects();
+        SetUpTransparentObjects();
         SetUpOverlayObjects();
-        SetUp3DObjects();
-        SetUpAreas();
+        SetUpOpaqueObjects();
     }
 
     private void SetUpSharedInfos()
@@ -175,7 +174,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         TestSettingToRenderBlock(LayerPassType.PrePass, clearQueue, 1, LayeringInfos.Last());
     }
 
-    private void SetUp2DObjects()
+    private void SetUpTransparentObjects()
     {
         SetUp2DTransparent();
     }
@@ -252,9 +251,10 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         // 没用过，没测试
     }
 
-    private void SetUp3DObjects()
+    private void SetUpOpaqueObjects()
     {
         SetUp3DOpaque();
+        SetUp2DOpaque();
     }
 
     private void SetUp3DOpaque()
@@ -277,12 +277,12 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         TestSettingToRenderBlock(LayerPassType.PrePass, opaqueRenderQueue - 1, 1, LayeringInfos.Last());
     }
 
-    private void SetUpAreas()
+    private void SetUp2DOpaque()
     {
-        for (int i = 0; i < layeringController.testPlaneMaterials.Length; ++i)
+        for (int i = 0; i < layeringController.test2DOpaqueMaterials.Length; ++i)
         {
             int polygonQueue = opaqueRenderQueue++;
-            SetQueue(layeringController.testPlaneMaterials, i, polygonQueue);
+            SetQueue(layeringController.test2DOpaqueMaterials, i, polygonQueue);
             AddToList(new LayeringInfo()
             {
                 GeoType = GeometryType.Grounded,

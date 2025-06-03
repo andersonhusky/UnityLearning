@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class LayeringController : MonoBehaviour
 {
-    public Material[] testPlaneMaterials;
+    public Material[] test2DOpaqueMaterials;
     public Material[] test3DOpaqueObjectMaterials;
     public Material[] test2DTransparentObjectMaterials;
     public Material[] testOverlayDefaultObjectMaterials;
