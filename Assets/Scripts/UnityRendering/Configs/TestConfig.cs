@@ -133,20 +133,21 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     private void InitConfig()
     {
-        if(LayeringInfos == null)
+        if (LayeringInfos == null)
         {
             LayeringInfos = new List<LayeringInfo>();
         }
 
         LayeringInfos.Clear();
         transparentLayeringInfos.Clear();
-        
+
         opaqueRenderQueue = 100; //Start queue number can be any number that make sense
         transparentRenderQueue = 2500;
         SetUpSharedInfos();
 
-        // SetUpClearTile();
+        SetUpClearTile();
         SetUp2DObjects();
+        SetUpOverlayObjects();
         SetUp3DObjects();
         SetUpAreas();
     }
@@ -179,9 +180,13 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         SetUp2DTransparent();
     }
 
+    /// <summary>
+    /// Add Comment by White Hong - 2025-05-30 18:50:30
+    /// 在LayeringManager中没有解决优先级问题，目前走这部分材质应该走ExternalPass
+    /// <summary>
     private void SetUp2DTransparent()
     {
-        for(int i = 0; i < layeringController.test2DTransparentObjectMaterials.Length; ++i)
+        for (int i = 0; i < layeringController.test2DTransparentObjectMaterials.Length; ++i)
         {
             int objectQueue = transparentRenderQueue--;
             SetQueue(layeringController.test2DTransparentObjectMaterials, i, objectQueue);
@@ -199,6 +204,29 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         TestSettingToRenderBlock(LayerPassType.PrePass, transparentRenderQueue + 1, 1, LayeringInfos.Last());
     }
 
+    private void SetUpOverlayObjects()
+    {
+        SetUpOverlayDefault();
+    }
+
+    private void SetUpOverlayDefault()
+    {
+        for (int i = 0; i < layeringController.testOverlayDefaultObjectMaterials.Length; ++i)
+        {
+            int objectQueue = transparentRenderQueue--;
+            SetQueue(layeringController.testOverlayDefaultObjectMaterials, i, objectQueue);
+            AddToList(new LayeringInfo()
+            {
+                GeoType = GeometryType.Grounded,
+                Output = OutputType.OverlayDefault,
+                RenderQueue = objectQueue,
+                Mode = MapMode.MapAll,
+                RenderingLayerMask = Layer.k_Default,
+                OpaqueIndexAbove = opaqueElementIndexAbove
+            });
+        }
+    }
+
     private void SetUp3DObjects()
     {
         SetUp3DOpaque();
@@ -207,7 +235,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
     private void SetUp3DOpaque()
     {
         opaqueRenderQueue = 2000;
-        for(int i = 0; i < layeringController.test3DOpaqueObjectMaterials.Length; ++i)
+        for (int i = 0; i < layeringController.test3DOpaqueObjectMaterials.Length; ++i)
         {
             int objectQueue = opaqueRenderQueue++;
             SetQueue(layeringController.test3DOpaqueObjectMaterials, i, objectQueue);
@@ -226,7 +254,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     private void SetUpAreas()
     {
-        for(int i = 0; i < layeringController.testPlaneMaterials.Length; ++i)
+        for (int i = 0; i < layeringController.testPlaneMaterials.Length; ++i)
         {
             int polygonQueue = opaqueRenderQueue++;
             SetQueue(layeringController.testPlaneMaterials, i, polygonQueue);
@@ -246,23 +274,23 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     private static bool SetQueue(Material[] materials, int index, int queue, string log = "")
     {
-        if(materials is null || materials.Length <= index || index < 0)
+        if (materials is null || materials.Length <= index || index < 0)
         {
             Debug.LogError($"Cannot find material index {index}! " + log);
             return false;
         }
 
-        if(materials[index] is null)
+        if (materials[index] is null)
         {
             Debug.LogError($"Cannot find material for queue {queue} in unity map editor! " + log);
             return false;
         }
 
-        if(isDebug)
+        if (isDebug)
         {
             Debug.Log($"{queue}, {materials[index].name} {log}");
         }
-        if(materials[index].HasProperty(SG_QueueControl))
+        if (materials[index].HasProperty(SG_QueueControl))
         {
             materials[index].SetFloat(SG_QueueControl, 1);
         }
@@ -277,9 +305,9 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
         info.OpaqueIndexAbove = opaqueElementIndexAbove;
 
         LayeringInfos.Add(info);
-        if(!isTransparent)
+        if (!isTransparent)
         {
-            opaqueElementIndexAbove = LayeringInfos.Count -1;
+            opaqueElementIndexAbove = LayeringInfos.Count - 1;
         }
     }
 
@@ -294,7 +322,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
 
     private void TestSettingToRenderBlock(LayerPassType excludePass, int queue, int stencilRef, LayeringInfo layeringInfo)
     {
-        if(!isLogRenderBlock)    return;
+        if (!isLogRenderBlock) return;
 
         MapLayeringManager.LayerPassInfoPair layerPassInfoPair = new MapLayeringManager.LayerPassInfoPair
         {

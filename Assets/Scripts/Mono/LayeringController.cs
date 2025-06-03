@@ -7,6 +7,7 @@ public class LayeringController : MonoBehaviour
     public Material[] testPlaneMaterials;
     public Material[] test3DOpaqueObjectMaterials;
     public Material[] test2DTransparentObjectMaterials;
+    public Material[] testOverlayDefaultObjectMaterials;
     // Start is called before the first frame update
     void Start()
     {
