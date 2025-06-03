@@ -208,6 +208,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
     {
         SetUpOverlayDefault();
         SetUpOverlayTransparent();
+        SetUpOverlayOpaque();
     }
 
     private void SetUpOverlayDefault()
@@ -244,6 +245,11 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 OpaqueIndexAbove = opaqueElementIndexAbove
             });
         }
+    }
+
+    private void SetUpOverlayOpaque()
+    {
+        // 没用过，没测试
     }
 
     private void SetUp3DObjects()
