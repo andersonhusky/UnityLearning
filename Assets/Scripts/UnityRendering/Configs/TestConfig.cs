@@ -207,6 +207,7 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
     private void SetUpOverlayObjects()
     {
         SetUpOverlayDefault();
+        SetUpOverlayTransparent();
     }
 
     private void SetUpOverlayDefault()
@@ -221,6 +222,24 @@ public class LayerRenderingConfiguration : IMapLayeringConfiguration
                 Output = OutputType.OverlayDefault,
                 RenderQueue = objectQueue,
                 Mode = MapMode.MapAll,
+                RenderingLayerMask = Layer.k_Default,
+                OpaqueIndexAbove = opaqueElementIndexAbove
+            });
+        }
+    }
+
+    private void SetUpOverlayTransparent()
+    {
+        for (int i = 0; i < layeringController.testOverlayTransparentObjectMaterials.Length; ++i)
+        {
+            int objectQueue = transparentRenderQueue--;
+            SetQueue(layeringController.testOverlayTransparentObjectMaterials, i, objectQueue);
+            AddToList(new LayeringInfo()
+            {
+                GeoType = GeometryType.Grounded,
+                Output = OutputType.OverlayTransparent,
+                RenderQueue = objectQueue,
+                Mode = MapMode.Map3D,
                 RenderingLayerMask = Layer.k_Default,
                 OpaqueIndexAbove = opaqueElementIndexAbove
             });
